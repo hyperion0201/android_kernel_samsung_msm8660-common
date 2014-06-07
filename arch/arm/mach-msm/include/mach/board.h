@@ -354,8 +354,6 @@ struct msm_panel_common_pdata {
 	int (*mdp_gamma)(void);
 };
 
-
-
 struct lcdc_platform_data {
 	int (*lcdc_gpio_config)(int on);
 	int (*lcdc_power_save)(int);
