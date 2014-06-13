@@ -4092,7 +4092,7 @@ static void __init msm8x60_init_dsps(void)
 #define MSM_SMI_BASE            0x38000000
 #define MSM_SMI_SIZE            0x4000000
 
-#define MSM_ION_SF_SIZE		0x3000000 /* 64MB -> 48MB */
+#define MSM_ION_SF_SIZE		0x4000000 /* 64MB */
 #define MSM_ION_CAMERA_SIZE	0x1000000 /* 18MB -> 16MB */
 #define MSM_ION_MM_FW_SIZE	0x200000 /* 2MB */
 #define MSM_ION_MM_SIZE		0x3D00000 /* 54MB -> 61MB */
