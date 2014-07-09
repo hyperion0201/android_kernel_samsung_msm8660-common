@@ -116,6 +116,12 @@
 #define POWER_IS_ON(pwr)	((pwr) <= FB_BLANK_NORMAL)
 
 //
+
+#ifdef CONFIG_COLOR_CALIBRATION
+int v1_offset[3] = {0, 0, 0};
+u32 color_adj[3];
+#endif
+
 struct ld9040 {
 	struct device			*dev;
 	struct spi_device		*spi;
@@ -827,9 +833,27 @@ static void lcd_gamma_smartDimming_apply(int srcGamma)
         #ifndef CONFIG_USA_MODEL_SGH_T989    
 	DPRINT("lcd_gamma_smartDimming_apply %d -> %d\n", srcGamma, original_bl);
 	#endif
- 	calc_gamma_table(&(lcd.smart), original_bl, EA8868_SM2_GAMMA_SmartDimming[0].parameter);
+	calc_gamma_table(&(lcd.smart), original_bl, EA8868_SM2_GAMMA_SmartDimming[0].parameter
+#ifdef CONFIG_COLOR_CALIBRATION
+                         , v1_offset, color_adj
+#endif
+                         );
+
 	setting_table_write(EA8868_SM2_GAMMA_SmartDimming);
 }
+
+#ifdef CONFIG_COLOR_CALIBRATION
+static int ld9040_adj_gamma_table(int bl)
+{
+	int i = bl;
+
+	calc_gamma_table(&(lcd.smart), candela_table[i],
+		EA8868_SM2_GAMMA_SmartDimming[0].parameter, v1_offset, color_adj);
+
+	return 0;
+}
+#endif
+
 #define MTP_READ_DELAY DEFAULT_USLEEP
 static void ld9040_read_mtp(u8 *mtp_data)
 {
@@ -886,6 +910,132 @@ static void ld9040_read_mtp(u8 *mtp_data)
     setting_table_write(disable_mtp_register);
 	lcd.isSmartDimming_loaded = TRUE;
 }
+
+#ifdef CONFIG_COLOR_CALIBRATION
+
+static ssize_t red_multiplier_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", color_adj[0]);
+}
+
+static ssize_t red_multiplier_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	u32 value;
+	if (sscanf(buf, "%u", &value) == 1)
+	{
+		color_adj[0] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static ssize_t green_multiplier_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", color_adj[1]);
+}
+
+static ssize_t green_multiplier_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	u32 value;
+	if (sscanf(buf, "%u", &value) == 1)
+	{
+		color_adj[1] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static ssize_t blue_multiplier_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", color_adj[2]);
+}
+
+static ssize_t blue_multiplier_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	u32 value;
+	if (sscanf(buf, "%u", &value) == 1)
+	{
+		color_adj[2] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static ssize_t red_v1_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%i\n", v1_offset[0]);
+}
+
+static ssize_t red_v1_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	u32 value;
+	if (sscanf(buf, "%i", &value) == 1)
+	{
+		v1_offset[0] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static ssize_t green_v1_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%i\n", v1_offset[1]);
+}
+
+static ssize_t green_v1_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	u32 value;
+	if (sscanf(buf, "%i", &value) == 1)
+	{
+		v1_offset[1] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static ssize_t blue_v1_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%i\n", v1_offset[2]);
+}
+
+static ssize_t blue_v1_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	int value;
+	if (sscanf(buf, "%i", &value) == 1)
+	{
+		v1_offset[2] = value;
+		ColorGammaUpdate();
+	}
+	return size;
+}
+
+static DEVICE_ATTR(red_v1_offset, S_IRUGO | S_IWUGO, red_v1_offset_show, red_v1_offset_store);
+static DEVICE_ATTR(green_v1_offset, S_IRUGO | S_IWUGO, green_v1_offset_show, green_v1_offset_store);
+static DEVICE_ATTR(blue_v1_offset, S_IRUGO | S_IWUGO, blue_v1_offset_show, blue_v1_offset_store);
+static DEVICE_ATTR(red_multiplier, S_IRUGO | S_IWUGO, red_multiplier_show, red_multiplier_store);
+static DEVICE_ATTR(green_multiplier, S_IRUGO | S_IWUGO, green_multiplier_show, green_multiplier_store);
+static DEVICE_ATTR(blue_multiplier, S_IRUGO | S_IWUGO, blue_multiplier_show, blue_multiplier_store);
+
+
+static struct attribute *samoled_color_attributes[] = {
+	&dev_attr_red_v1_offset.attr,
+	&dev_attr_green_v1_offset.attr,
+	&dev_attr_blue_v1_offset.attr,
+	&dev_attr_red_multiplier.attr,
+	&dev_attr_green_multiplier.attr,
+	&dev_attr_blue_multiplier.attr,
+	NULL
+};
+
+static struct attribute_group samoled_color_group = {
+	.attrs = samoled_color_attributes,
+};
+
+static struct miscdevice samoled_color_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "samoled_color",
+};
+#endif
 
 #if 0
 static ssize_t mtp_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -1328,6 +1478,10 @@ static void ld9040_gamma_ctl(struct ld9040 *lcd)
 {
 	int tune_level = lcd->bl;
 
+#ifdef CONFIG_COLOR_CALIBRATION
+        ld9040_adj_gamma_table(tune_level);
+#endif
+
 	if(isEA8868)
 	{
 		setting_table_write(&ea8868_gamma_update_enable[0]);
@@ -1441,6 +1595,20 @@ DPRINT("%s %d %d\n", __func__,tune_level, lcd->current_brightness );
 	setting_table_write(&gamma_update[0]);
 
 }
+
+#ifdef CONFIG_COLOR_CALIBRATION
+void ColorGammaUpdate(void)
+{
+
+    if (ld9040_state.display_on) {
+	mutex_lock(&lcd.lock);
+        lcdc_ld9040_set_brightness(lcd.current_brightness);
+        mutex_unlock(&lcd.lock);
+    }
+
+}
+
+#endif
 
 static void lcdc_ld9040_set_brightness(int level)
 {
@@ -2200,6 +2368,18 @@ static int __devinit ld9040_probe(struct platform_device *pdev)
 	DPRINT("msm_fb_add_device START\n");
 	msm_fb_add_device(pdev);
 	DPRINT("msm_fb_add_device end\n");
+
+#ifdef CONFIG_COLOR_CALIBRATION
+	misc_register(&samoled_color_device);
+	if (sysfs_create_group(&samoled_color_device.this_device->kobj, &samoled_color_group) < 0)
+	{
+		printk("%s sysfs_create_group fail\n", __FUNCTION__);
+		pr_err("Failed to create sysfs group for device (%s)!\n", samoled_color_device.name);
+	}
+	color_adj[0] = 100000;
+	color_adj[1] = 100000;
+	color_adj[2] = 100000;
+#endif
 
 ///////////// sysfs
     sysfs_lcd_class = class_create(THIS_MODULE, "lcd");
