@@ -119,7 +119,7 @@
 
 #ifdef CONFIG_COLOR_CALIBRATION
 int v1_offset[3] = {0, 0, 0};
-u32 color_adj[3];
+u32 color_adj[3] = {100000, 100000, 100000};
 #endif
 
 struct ld9040 {
@@ -842,18 +842,6 @@ static void lcd_gamma_smartDimming_apply(int srcGamma)
 	setting_table_write(EA8868_SM2_GAMMA_SmartDimming);
 }
 
-#ifdef CONFIG_COLOR_CALIBRATION
-static int ld9040_adj_gamma_table(int bl)
-{
-	int i = bl;
-
-	calc_gamma_table(&(lcd.smart), candela_table[i],
-		EA8868_SM2_GAMMA_SmartDimming[0].parameter, v1_offset, color_adj);
-
-	return 0;
-}
-#endif
-
 #define MTP_READ_DELAY DEFAULT_USLEEP
 static void ld9040_read_mtp(u8 *mtp_data)
 {
@@ -923,6 +911,11 @@ static ssize_t red_multiplier_store(struct device *dev, struct device_attribute 
 	u32 value;
 	if (sscanf(buf, "%u", &value) == 1)
 	{
+                if (value > 200000 || value < 0)
+		{
+			value = 100000;
+		}
+
 		color_adj[0] = value;
 		ColorGammaUpdate();
 	}
@@ -939,6 +932,11 @@ static ssize_t green_multiplier_store(struct device *dev, struct device_attribut
 	u32 value;
 	if (sscanf(buf, "%u", &value) == 1)
 	{
+                if (value > 200000 || value < 0)
+		{
+			value = 100000;
+		}
+
 		color_adj[1] = value;
 		ColorGammaUpdate();
 	}
@@ -955,6 +953,11 @@ static ssize_t blue_multiplier_store(struct device *dev, struct device_attribute
 	u32 value;
 	if (sscanf(buf, "%u", &value) == 1)
 	{
+                if (value > 200000 || value < 0)
+		{
+			value = 100000;
+		}
+
 		color_adj[2] = value;
 		ColorGammaUpdate();
 	}
@@ -968,9 +971,14 @@ static ssize_t red_v1_offset_show(struct device *dev, struct device_attribute *a
 
 static ssize_t red_v1_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
-	u32 value;
+	int value;
 	if (sscanf(buf, "%i", &value) == 1)
 	{
+                if (value > 20 || value < -20)
+		{
+			value = 0;
+		}
+
 		v1_offset[0] = value;
 		ColorGammaUpdate();
 	}
@@ -984,9 +992,14 @@ static ssize_t green_v1_offset_show(struct device *dev, struct device_attribute 
 
 static ssize_t green_v1_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
-	u32 value;
+	int value;
 	if (sscanf(buf, "%i", &value) == 1)
 	{
+                if (value > 20 || value < -20)
+		{
+			value = 0;
+		}
+
 		v1_offset[1] = value;
 		ColorGammaUpdate();
 	}
@@ -1003,6 +1016,11 @@ static ssize_t blue_v1_offset_store(struct device *dev, struct device_attribute 
 	int value;
 	if (sscanf(buf, "%i", &value) == 1)
 	{
+                if (value > 20 || value < -20)
+		{
+			value = 0;
+		}
+
 		v1_offset[2] = value;
 		ColorGammaUpdate();
 	}
@@ -1478,10 +1496,6 @@ static void ld9040_gamma_ctl(struct ld9040 *lcd)
 {
 	int tune_level = lcd->bl;
 
-#ifdef CONFIG_COLOR_CALIBRATION
-        ld9040_adj_gamma_table(tune_level);
-#endif
-
 	if(isEA8868)
 	{
 		setting_table_write(&ea8868_gamma_update_enable[0]);
@@ -1602,7 +1616,12 @@ void ColorGammaUpdate(void)
 
     if (ld9040_state.display_on) {
 	mutex_lock(&lcd.lock);
-        lcdc_ld9040_set_brightness(lcd.current_brightness);
+
+	if(lcd.current_brightness <= 0)
+	    lcdc_ld9040_set_brightness(DFT_BACKLIGHT_VALUE);
+	else
+	    lcdc_ld9040_set_brightness(lcd.current_brightness);
+
         mutex_unlock(&lcd.lock);
     }
 
@@ -2376,9 +2395,6 @@ static int __devinit ld9040_probe(struct platform_device *pdev)
 		printk("%s sysfs_create_group fail\n", __FUNCTION__);
 		pr_err("Failed to create sysfs group for device (%s)!\n", samoled_color_device.name);
 	}
-	color_adj[0] = 100000;
-	color_adj[1] = 100000;
-	color_adj[2] = 100000;
 #endif
 
 ///////////// sysfs
