@@ -121,9 +121,7 @@ static ssize_t melfas_evt_status_show(struct device *dev, struct device_attribut
 
 static ssize_t melfas_evt_status_store(struct device *dev, struct device_attribute *attr,const char *sysfsbuf, size_t size)
 {
-	mutex_lock(&touchkey_driver->mutex);
 	sscanf(sysfsbuf, "%d", &melfas_evt_enable_status);
-	mutex_unlock(&touchkey_driver->mutex);
 	return size;
 }
 
@@ -208,7 +206,6 @@ struct i2c_touchkey_driver {
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	struct early_suspend early_suspend;
-	struct mutex mutex;
         atomic_t keypad_enable;
 };
 struct i2c_touchkey_driver *touchkey_driver = NULL;
@@ -367,7 +364,6 @@ void touchkey_work_func(struct work_struct *p)
 	int ret;
 	int retry = 10;
 
-	mutex_lock(&touchkey_driver->mutex);
 	set_touchkey_debug('a');
 //	printk("[TKEY] INPIN %d\n",gpio_get_value_cansleep(GPIO_TOUCHKEY));
 
@@ -389,7 +385,6 @@ void touchkey_work_func(struct work_struct *p)
 					printk("[TKEY] %s touchkey init success\n", __func__);
 					set_touchkey_debug('O');
 					enable_irq(IRQ_TOUCHKEY_INT);
-                                        mutex_unlock(&touchkey_driver->mutex);
 					return;
 				}
 				printk("[TKEY] %s %d i2c transfer error retry = %d\n", __func__, __LINE__, retry);
@@ -400,7 +395,6 @@ void touchkey_work_func(struct work_struct *p)
 			touchkey_enable = -1;
 			printk("[TKEY] %s touchkey died\n", __func__);
 			set_touchkey_debug('D');
-                        mutex_unlock(&touchkey_driver->mutex);
 			return;
 		}
 
@@ -428,7 +422,6 @@ void touchkey_work_func(struct work_struct *p)
 	//clear interrupt
 	printk("[TKEY] %s: END \n", __func__);
 	set_touchkey_debug('A');
-        mutex_unlock(&touchkey_driver->mutex);
 	enable_irq(IRQ_TOUCHKEY_INT);
 }
 
@@ -482,8 +475,6 @@ static irqreturn_t touchkey_interrupt(int irq, void *dummy)  // ks 79 - threaded
             return IRQ_HANDLED;
     }
 
-    mutex_lock(&touchkey_driver->mutex);
-
     set_touchkey_debug('I');
     disable_irq_nosync(IRQ_TOUCHKEY_INT);
 
@@ -528,7 +519,6 @@ static irqreturn_t touchkey_interrupt(int irq, void *dummy)  // ks 79 - threaded
             if (i2c_touchkey_read(KEYCODE_REG, data, 3) >= 0) {
                 printk("[TKEY] %s touchkey init success\n", __func__);
 				set_touchkey_debug('O');
-                                mutex_unlock(&touchkey_driver->mutex);
 				enable_irq(IRQ_TOUCHKEY_INT);
 				return IRQ_NONE;
 			}
@@ -539,7 +529,6 @@ static irqreturn_t touchkey_interrupt(int irq, void *dummy)  // ks 79 - threaded
 		touchkey_enable = -1;
 		printk("[TKEY] %s touchkey died\n", __func__);
 		set_touchkey_debug('D');
-                mutex_unlock(&touchkey_driver->mutex);
 		return IRQ_NONE;
 	}
 
@@ -654,14 +643,12 @@ static irqreturn_t touchkey_interrupt(int irq, void *dummy)  // ks 79 - threaded
 	}
 #endif
 	set_touchkey_debug('A');
-        mutex_unlock(&touchkey_driver->mutex);
 	enable_irq(IRQ_TOUCHKEY_INT);
     //queue_work(touchkey_wq, &touchkey_work);
 	return IRQ_HANDLED;
 }
 
 #if defined(CONFIG_USA_MODEL_SGH_I717) || defined (CONFIG_KOR_MODEL_SHV_E160L)
-// mutex is assumed to be locked before calling this function
 static int touchkey_auto_calibration(int autocal_on_off)
 {
 
@@ -708,7 +695,6 @@ static int touchkey_auto_calibration(int autocal_on_off)
 
 }
 #else
-// mutex is assumed to be locked before calling this function
 static void touchkey_auto_calibration(int autocal_on_off)
 {
 	signed char int_data[] ={0x50,0x00,0x00,0x01};
@@ -736,8 +722,6 @@ static void sec_touchkey_early_suspend(struct early_suspend *h)
     int ret = 0;
     /*signed char int_data[] ={0x80};*/
 #endif
-    mutex_lock(&touchkey_driver->mutex);
-
     touchkey_enable = 0;
     set_touchkey_debug('S');
     printk(KERN_DEBUG "sec_touchkey_early_suspend\n");
@@ -850,7 +834,6 @@ static void sec_touchkey_early_suspend(struct early_suspend *h)
 || defined (CONFIG_KOR_MODEL_SHV_E110S)
 	press_check = 0;
 #endif
-    mutex_unlock(&touchkey_driver->mutex);
 }
 
 static void sec_touchkey_early_resume(struct early_suspend *h)
@@ -858,8 +841,6 @@ static void sec_touchkey_early_resume(struct early_suspend *h)
 #if defined (CONFIG_EUR_MODEL_GT_I9210) || defined(CONFIG_USA_MODEL_SGH_I577) || defined(CONFIG_CAN_MODEL_SGH_I577R) || defined (CONFIG_USA_MODEL_SGH_T769) || defined (CONFIG_USA_MODEL_SGH_T989)
  	int ret =0;
 #endif
-        mutex_lock(&touchkey_driver->mutex);
-
 	set_touchkey_debug('R');
 	printk(KERN_DEBUG "[TKEY] sec_touchkey_early_resume\n");
 
@@ -871,7 +852,6 @@ static void sec_touchkey_early_resume(struct early_suspend *h)
 
 	if (touchkey_enable < 0) {
 		printk("[TKEY] %s touchkey_enable: %d\n", __FUNCTION__, touchkey_enable);
-                mutex_unlock(&touchkey_driver->mutex);
 		return;
 	}
 
@@ -1050,7 +1030,6 @@ if(touchled_cmd_reversed) {
 schedule_delayed_work(&touch_resume_work, msecs_to_jiffies(500));
 #endif
 
-        mutex_unlock(&touchkey_driver->mutex);
 }
 #endif				// End of CONFIG_HAS_EARLYSUSPEND
 
@@ -1204,10 +1183,6 @@ static int i2c_touchkey_probe(struct i2c_client *client, const struct i2c_device
 		return err;
 	}
 
-        // initialize the mutex and lock to allow initialization to finish uninterrupted
-	mutex_init(&touchkey_driver->mutex);
-	mutex_lock(&touchkey_driver->mutex);
-
     //	gpio_pend_mask_mem = ioremap(INT_PEND_BASE, 0x10);  //temp ks
     INIT_DELAYED_WORK(&touch_resume_work, touchkey_resume_func);
 
@@ -1224,7 +1199,6 @@ static int i2c_touchkey_probe(struct i2c_client *client, const struct i2c_device
 
 	if (err) {
 		printk(KERN_ERR "%s Can't allocate irq .. %d\n", __FUNCTION__, err);
-                mutex_unlock(&touchkey_driver->mutex);
 		return -EBUSY;
 	}
 #if defined(CONFIG_USA_MODEL_SGH_T989)||defined (CONFIG_USA_MODEL_SGH_I727) || defined (CONFIG_USA_MODEL_SGH_T769) || defined(CONFIG_USA_MODEL_SGH_I577)\
@@ -1275,7 +1249,6 @@ if (get_hw_rev() >=0x02) {
 }
 #endif
 	set_touchkey_debug('K');
-        mutex_unlock(&touchkey_driver->mutex);
 #if defined(CONFIG_GENERIC_BLN)
     register_bln_implementation(&cypress_touchkey_bln);
 #endif
@@ -1400,12 +1373,10 @@ static ssize_t touch_version_read(struct device *dev,
 	char data[3] = { 0, };
 	int count;
 
-	mutex_lock(&touchkey_driver->mutex);
 	init_hw();
 	if (get_touchkey_firmware(data) != 0)
 		i2c_touchkey_read(KEYCODE_REG, data, 3);
 	count = sprintf(buf, "0x%x\n", data[1]);
-	mutex_unlock(&touchkey_driver->mutex);
 
 	printk("[TKEY] touch_version_read 0x%x\n", data[1]);
 	return count;
@@ -1496,17 +1467,14 @@ static ssize_t touch_led_control(struct device *dev, struct device_attribute *at
 {
 	int int_data = 0;
 	int errnum = 0;
-
-	mutex_lock(&touchkey_driver->mutex);
-
 #if defined(CONFIG_KOR_MODEL_SHV_E160L)
 	if(touchkey_connected==0){
 		printk(KERN_ERR "[TKEY] led_control return connect_error\n");
-		goto unlock;
+		return size;
 		}
 	if( touchkey_downloading_status ){
 		printk(KERN_ERR "[TKEY] led_control return update_status_error or downloading now! \n");
-		goto unlock;
+		return size;
 	}
 #endif
 	if(buf != NULL){
@@ -1561,8 +1529,6 @@ static ssize_t touch_led_control(struct device *dev, struct device_attribute *at
 	} else
 		printk("touch_led_control Error\n");
 
-unlock:
-	mutex_unlock(&touchkey_driver->mutex);
 	return size;
 }
 
@@ -1600,7 +1566,6 @@ static ssize_t touchkey_menu_show(struct device *dev, struct device_attribute *a
     u8 data[18] = {0, };
     int ret;
 
-    mutex_lock(&touchkey_driver->mutex);
     ret = i2c_touchkey_read(KEYCODE_REG, data, 18);
 
     #if defined(CONFIG_KOR_MODEL_SHV_E160L)||defined(CONFIG_JPN_MODEL_SC_05D)
@@ -1611,8 +1576,6 @@ static ssize_t touchkey_menu_show(struct device *dev, struct device_attribute *a
     menu_sensitivity = ((0x00FF&data[10])<<8)|data[11];
     #endif
 
-    mutex_unlock(&touchkey_driver->mutex);
-
     return sprintf(buf,"%d\n",menu_sensitivity);
 }
 
@@ -1621,10 +1584,8 @@ static ssize_t touchkey_home_show(struct device *dev, struct device_attribute *a
 	u8 data[18] = {0, };
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 18);
 	printk("[TKEY] %s data[12] =%d,data[13] = %d\n",__func__,data[12],data[13]);
-        mutex_unlock(&touchkey_driver->mutex);
 	home_sensitivity = ((0x00FF&data[12])<<8)|data[13];
 	return sprintf(buf,"%d\n",home_sensitivity);
 }
@@ -1634,7 +1595,6 @@ static ssize_t touchkey_back_show(struct device *dev, struct device_attribute *a
 	u8 data[18] = {0, };
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 18);
 
 #if defined (CONFIG_KOR_MODEL_SHV_E110S)
@@ -1674,7 +1634,6 @@ static ssize_t touchkey_back_show(struct device *dev, struct device_attribute *a
 	printk("called %s data[14] =%d,data[15] = %d\n",__func__,data[14],data[15]);
 	back_sensitivity = ((0x00FF&data[14])<<8)|data[15];
 #endif
-        mutex_unlock(&touchkey_driver->mutex);
 
 	return sprintf(buf,"%d\n",back_sensitivity);
 }
@@ -1684,11 +1643,9 @@ static ssize_t touchkey_search_show(struct device *dev, struct device_attribute 
 	u8 data[18] = {0, };
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 18);
 	printk("called %s data[16] =%d,data[17] = %d\n",__func__,data[16],data[17]);
-        mutex_unlock(&touchkey_driver->mutex);
 	search_sensitivity = ((0x00FF&data[16])<<8)|data[17];
 	return sprintf(buf,"%d\n",search_sensitivity);
 }
@@ -1698,11 +1655,9 @@ static ssize_t touchkey_threshold_show(struct device *dev, struct device_attribu
 	u8 data[18];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 18);
 	printk("called %s data[4] =%d\n",__func__,data[4]);
-        mutex_unlock(&touchkey_driver->mutex);
 	return sprintf(buf,"%d\n",data[4]);
 }
 
@@ -1711,11 +1666,9 @@ static ssize_t touchkey_raw_data0_show(struct device *dev, struct device_attribu
 	u8 data[26];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 26);
 	printk("called %s data[18] =%d,data[19] = %d\n",__func__,data[18],data[19]);
-        mutex_unlock(&touchkey_driver->mutex);
 	raw_data0 = ((0x00FF&data[18])<<8)|data[19];
 	return sprintf(buf,"%d\n",raw_data0);
 }
@@ -1725,11 +1678,9 @@ static ssize_t touchkey_raw_data1_show(struct device *dev, struct device_attribu
 	u8 data[26];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 26);
 	printk("called %s data[20] =%d,data[21] = %d\n",__func__,data[20],data[21]);
-        mutex_unlock(&touchkey_driver->mutex);
 	raw_data1 = ((0x00FF&data[20])<<8)|data[21];
 	return sprintf(buf,"%d\n",raw_data1);
 }
@@ -1739,11 +1690,9 @@ static ssize_t touchkey_raw_data2_show(struct device *dev, struct device_attribu
 	u8 data[26];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 26);
 	printk("called %s data[22] =%d,data[23] = %d\n",__func__,data[22],data[23]);
-        mutex_unlock(&touchkey_driver->mutex);
 	raw_data2 = ((0x00FF&data[22])<<8)|data[23];
 	return sprintf(buf,"%d\n",raw_data2);
 }
@@ -1753,11 +1702,9 @@ static ssize_t touchkey_raw_data3_show(struct device *dev, struct device_attribu
 	u8 data[26];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 26);
 	printk("called %s data[24] =%d,data[25] = %d\n",__func__,data[24],data[25]);
-        mutex_unlock(&touchkey_driver->mutex);
 	raw_data3 = ((0x00FF&data[24])<<8)|data[25];
 	return sprintf(buf,"%d\n",raw_data3);
 }
@@ -1767,11 +1714,9 @@ static ssize_t touchkey_idac0_show(struct device *dev, struct device_attribute *
 	u8 data[10];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 10);
 	printk("called %s data[6] =%d\n",__func__,data[6]);
-        mutex_unlock(&touchkey_driver->mutex);
 	idac0 = data[6];
 	return sprintf(buf,"%d\n",idac0);
 }
@@ -1781,11 +1726,9 @@ static ssize_t touchkey_idac1_show(struct device *dev, struct device_attribute *
 	u8 data[10];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 10);
 	printk("called %s data[7] = %d\n",__func__,data[7]);
-        mutex_unlock(&touchkey_driver->mutex);
 	idac1 = data[7];
 	return sprintf(buf,"%d\n",idac1);
 }
@@ -1795,11 +1738,9 @@ static ssize_t touchkey_idac2_show(struct device *dev, struct device_attribute *
 	u8 data[10];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 10);
 	printk("called %s data[8] =%d\n",__func__,data[8]);
-        mutex_unlock(&touchkey_driver->mutex);
 	idac2 = data[8];
 	return sprintf(buf,"%d\n",idac2);
 }
@@ -1809,11 +1750,9 @@ static ssize_t touchkey_idac3_show(struct device *dev, struct device_attribute *
 	u8 data[10];
 	int ret;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	ret = i2c_touchkey_read(KEYCODE_REG, data, 10);
 	printk("called %s data[9] = %d\n",__func__,data[9]);
-        mutex_unlock(&touchkey_driver->mutex);
 	idac3 = data[9];
 	return sprintf(buf,"%d\n",idac3);
 }
@@ -1824,12 +1763,10 @@ static ssize_t autocalibration_enable(struct device *dev, struct device_attribut
 {
         int data;
 
-	mutex_lock(&touchkey_driver->mutex);
         sscanf(buf, "%d\n", &data);
 
         if(data == 1)
                 touchkey_auto_calibration(1/*on*/);
-	mutex_unlock(&touchkey_driver->mutex);
 
         return size;
 }
@@ -1842,9 +1779,7 @@ static ssize_t autocalibration_status(struct device *dev, struct device_attribut
         printk("called %s \n",__func__);
 
 
-        mutex_lock(&touchkey_driver->mutex);
         ret = i2c_touchkey_read(KEYCODE_REG, data, 6);
-        mutex_unlock(&touchkey_driver->mutex);
         if((data[5] & 0x80))
                 return sprintf(buf,"Enabled\n");
         else
@@ -1857,8 +1792,6 @@ static ssize_t autocalibration_status(struct device *dev, struct device_attribut
 static ssize_t touch_sensitivity_control(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
 	unsigned char data = 0x40;
-
-	mutex_lock(&touchkey_driver->mutex);
 #if defined (CONFIG_KOR_MODEL_SHV_E160L)
 //	int ret;
 //	unsigned char data_buf[2]={0,};
@@ -1883,7 +1816,6 @@ static ssize_t touch_sensitivity_control(struct device *dev, struct device_attri
 #endif
 	printk("[TKEY] called %s \n",__func__);
 	i2c_touchkey_write(&data, 1);
-	mutex_unlock(&touchkey_driver->mutex);
 	return size;
 }
 
@@ -1894,7 +1826,6 @@ static ssize_t touch_recommend_read(struct device *dev, struct device_attribute 
 {
 	char data[3] = { 0, };
 	int count;
-	mutex_lock(&touchkey_driver->mutex);
 #if defined (CONFIG_KOR_MODEL_SHV_E110S)
 		if ((get_hw_rev() == 0x03) || (get_hw_rev() == 0x04)){
 			data[1] = 0x08;
@@ -1950,7 +1881,6 @@ static ssize_t touch_recommend_read(struct device *dev, struct device_attribute 
 #endif
 
 	count = sprintf(buf, "0x%x\n", data[1]);
-	mutex_unlock(&touchkey_driver->mutex);
 
 	printk("touch_recommend_read 0x%x\n", data[1]);
 	return count;
@@ -1988,7 +1918,6 @@ static ssize_t set_touchkey_update_show(struct device *dev, struct device_attrib
 	int retry=3;
 	touchkey_update_status = 1;
 
-	mutex_lock(&touchkey_driver->mutex);
 #ifdef TEST_JIG_MODE
 	unsigned char get_touch = 0x40;
 #endif
@@ -2022,7 +1951,6 @@ static ssize_t set_touchkey_update_show(struct device *dev, struct device_attrib
 #ifdef TEST_JIG_MODE
 	i2c_touchkey_write(&get_touch, 1);
 #endif
-	mutex_unlock(&touchkey_driver->mutex);
 
 	return count;
 }
@@ -2033,11 +1961,9 @@ static ssize_t set_touchkey_autocal_show(struct device *dev, struct device_attri
 
 	/*TO DO IT */
 
-	mutex_lock(&touchkey_driver->mutex);
 	printk("called %s \n",__func__);
 	count0 = cypress_write_register(0x00, 0x50);
 	count1 = cypress_write_register(0x03, 0x01);
-	mutex_unlock(&touchkey_driver->mutex);
 
     // init_hw();	/* after update, re initalize. */
 	return (count0&&count1);
@@ -2048,7 +1974,6 @@ static ssize_t set_touchkey_firm_version_read_show(struct device *dev, struct de
 	char data[3] = { 0, };
 	int count;
 
-        mutex_lock(&touchkey_driver->mutex);
 	init_hw();
 	if (get_touchkey_firmware(data) != 0) {
 		i2c_touchkey_read(KEYCODE_REG, data, 3);
@@ -2056,7 +1981,6 @@ static ssize_t set_touchkey_firm_version_read_show(struct device *dev, struct de
 	count = sprintf(buf, "0x%x\n", data[1]);
 
 	printk(KERN_DEBUG "[TouchKey] touch_version_read 0x%x\n", data[1]);
-        mutex_unlock(&touchkey_driver->mutex);
 	return count;
 }
 
@@ -2064,7 +1988,6 @@ static ssize_t set_touchkey_firm_status_show(struct device *dev, struct device_a
 {
 	int count = 0;
 
-        mutex_lock(&touchkey_driver->mutex);
 	printk(KERN_DEBUG
 	       "[TouchKey] touch_update_read: touchkey_update_status %d\n",
 	       touchkey_update_status);
@@ -2076,7 +1999,6 @@ static ssize_t set_touchkey_firm_status_show(struct device *dev, struct device_a
 	} else if (touchkey_update_status == -1) {
 		count = sprintf(buf, "Fail\n");
 	}
-        mutex_unlock(&touchkey_driver->mutex);
 	return count;
 }
 
@@ -2105,14 +2027,12 @@ static ssize_t brightness_control(struct device *dev, struct device_attribute *a
 {
 	int data;
 
-	mutex_lock(&touchkey_driver->mutex);
 	if (sscanf(buf, "%d\n", &data) == 1) {
 		printk(KERN_ERR "[TouchKey] touch_led_brightness: %d \n", data);
 		change_touch_key_led_voltage(data);
 	} else {
 		printk(KERN_ERR "[TouchKey] touch_led_brightness Error\n");
 	}
-	mutex_unlock(&touchkey_driver->mutex);
 	return size;
 }
 
