@@ -15,6 +15,7 @@
 #ifndef _KREF_H_
 #define _KREF_H_
 
+#include <linux/atomic.h>
 #include <linux/types.h>
 #include <linux/atomic.h>
 
@@ -32,5 +33,4 @@ static inline int __must_check kref_get_unless_zero(struct kref *kref)
 {
 	return atomic_add_unless(&kref->refcount, 1, 0);
 }
-
 #endif /* _KREF_H_ */
