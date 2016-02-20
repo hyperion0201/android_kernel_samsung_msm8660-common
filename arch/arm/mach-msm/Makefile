@@ -9,6 +9,10 @@ ifdef CONFIG_TARGET_SERIES_CELOX
 BOARD_OBJ_NAME:=board-msm8x60_celox.o
 GPIOMUX_OBJ_NAME:=gpiomux-8x60_celox.o
 endif
+ifdef CONFIG_TARGET_SERIES_DALI
+BOARD_OBJ_NAME:=board-msm8x60_dali.o
+GPIOMUX_OBJ_NAME:=gpiomux-8x60_dali.o
+endif
 
 obj-y += io.o dma.o memory.o
 ifndef CONFIG_ARM_ARCH_TIMER

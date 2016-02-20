@@ -19,6 +19,8 @@
 #include <linux/msm_ssbi.h>
 #include <linux/mfd/pmic8058.h>
 
+#include "../../../drivers/video/msm/msm_fb.h"
+
 #include <linux/leds.h>
 #include <linux/pmic8058-othc.h>
 #include <linux/mfd/pmic8901.h>
@@ -41,6 +43,8 @@
 #include <linux/i2c/isa1200.h>
 #include <linux/dma-mapping.h>
 #include <linux/i2c/bq27520.h>
+#include <linux/memblock.h>
+#include <linux/msm_tsens.h>
 
 #ifdef CONFIG_TOUCHSCREEN_MELFAS
 #define TOUCHSCREEN_IRQ 		125  
@@ -109,6 +113,7 @@
 #include <mach/msm_spi.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/msm_serial_hs_lite.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_memtypes.h>
 #include <asm/mach/mmc.h>
@@ -134,7 +139,6 @@
 #include <mach/restart.h>
 #include <mach/board-msm8660.h>
 #include <mach/devices-lte.h>
-#include <mach/iommu_domains.h>
 
 #include "devices.h"
 #include "devices-msm8x60.h"
@@ -153,7 +157,7 @@
 #include "pm-boot.h"
 #include "board-storage-common-a.h"
 
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <mach/ion.h>
 
 #include <linux/power_supply.h>
@@ -176,8 +180,16 @@
 #if defined(CONFIG_TDMB) || defined(CONFIG_TDMB_MODULE)
 #include <mach/tdmb_pdata.h>
 #endif
+/*
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 #include <linux/video/sec_mipi_lcd_esd_refresh.h>
+#endif
+*/
+#ifdef CONFIG_CPU_FREQ_GOV_BADASS_2_PHASE
+	int set_two_phase_freq_badass(int cpufreq);
+#endif
+#ifdef CONFIG_CPU_FREQ_GOV_BADASS_3_PHASE
+	int set_three_phase_freq_badass(int cpufreq);
 #endif
 
 #define MSM_SHARED_RAM_PHYS 0x40000000
@@ -277,6 +289,10 @@
 
 #ifdef CONFIG_ION_MSM
 static struct platform_device ion_dev;
+#endif
+
+#ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
+int set_two_phase_freq(int cpufreq);
 #endif
 
 #if defined (CONFIG_OPTICAL_GP2A) || defined (CONFIG_OPTICAL_GP2AP020A00F) || defined(CONFIG_OPTICAL_TAOS)
@@ -715,8 +731,8 @@ static struct regulator_init_data saw_s0_init_data = {
 		.constraints = {
 			.name = "8901_s0",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 800000,
-			.max_uV = 1250000,
+			.min_uV = 700000,
+			.max_uV = 1400000,
 		},
 		.consumer_supplies = vreg_consumers_8901_S0,
 		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S0),
@@ -726,8 +742,8 @@ static struct regulator_init_data saw_s1_init_data = {
 		.constraints = {
 			.name = "8901_s1",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 800000,
-			.max_uV = 1250000,
+			.min_uV = 700000,
+			.max_uV = 1400000,
 		},
 		.consumer_supplies = vreg_consumers_8901_S1,
 		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S1),
@@ -2424,7 +2440,6 @@ static int camera_power_maincam(int onoff)
 			}
 		}
 		mdelay(5);
-
 	}
 	
 	return 0;
@@ -2694,14 +2709,14 @@ static struct msm_bus_vectors cam_video_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 283115520,
-		.ib  = 452984832,
+		.ab  = 706199040,
+		.ib  = 1129918464,
 	},
 	{
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 283115520,
-		.ib  = 452984832,
+		.ab  = 706199040,
+		.ib  = 1129918464,
 	},
 	{
 		.src = MSM_BUS_MASTER_VPE,
@@ -3440,7 +3455,7 @@ static struct msm_spi_platform_data msm_gsbi1_qup_spi_pdata = {
 #endif
 #endif
 static struct msm_i2c_platform_data msm_gsbi3_qup_i2c_pdata = {
-	.clk_freq = 384000,
+	.clk_freq = 100000,
 	.src_clk_rate = 24000000,
 	.msm_i2c_config_gpio = gsbi_qup_i2c_gpio_config,
 };
@@ -3851,15 +3866,6 @@ void disable_charging_before_reset(void)
 }
 #endif /* CONFIG_BATTERY_SEC */
 
-#ifdef CONFIG_FB_MSM_LCDC_DSUB
-/* VGA = 1440 x 900 x 4(bpp) x 2(pages)
-   prim = 1024 x 600 x 4(bpp) x 2(pages)
-   This is the difference. */
-#define MSM_FB_DSUB_PMEM_ADDER (0xA32000-0x4B0000)
-#else
-#define MSM_FB_DSUB_PMEM_ADDER (0)
-#endif
-
 /* Sensors DSPS platform data */
 #ifdef CONFIG_MSM_DSPS
 
@@ -3911,163 +3917,38 @@ static void __init msm8x60_init_dsps(void)
 }
 #endif /* CONFIG_MSM_DSPS */
 
-#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
-#define MSM_FB_PRIM_BUF_SIZE_MULTIPLIER (3)
-#else
-#define MSM_FB_PRIM_BUF_SIZE_MULTIPLIER (2)
-#endif 
-#if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
-/* prim = 736 x 1280 x 4(bpp) x 2(pages) */
-#define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((736 * 1280 * 4), 4096) * MSM_FB_PRIM_BUF_SIZE_MULTIPLIER)
-#elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL)
-/* prim = 800 x 1280 x 4(bpp) x 2(pages) */ 
-#define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((800 * 1280 * 4), 4096) * MSM_FB_PRIM_BUF_SIZE_MULTIPLIER)
-#else
-#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
-#define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((800 * 480 * 4), 4096) * 3) /* 4 bpp x 3 pages */
-#else
-#define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((800 * 480 * 4), 4096) * 2) /* 4 bpp x 2 pages */
-#endif
-#endif
+/* Memory map */
+#define MSM_ION_HEAP_NUM	7
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
-#define MSM_FB_EXT_BUF_SIZE  \
-		(roundup((1920 * 1080 * 2), 4096) * 2) /* 2 bpp x 2 page */
-#elif defined(CONFIG_FB_MSM_TVOUT)
-#define MSM_FB_EXT_BUF_SIZE  \
-		(roundup((720 * 576 * 2), 4096) * 2) /* 2 bpp x 2 pages */
+#define MSM_FB_SIZE roundup((roundup((800 * 480 * 4), 4096) * 3) + \
+				(roundup((1920 * 1080 * 2), 4096) * 2), 4096)
 #else
-#define MSM_FB_EXT_BUF_SIZE	0
+#define MSM_FB_SIZE roundup((roundup((800 * 480 * 4), 4096) * 3), 4096)
 #endif
 
-/* Note: must be multiple of 4096 */
-#define MSM_FB_SIZE roundup(MSM_FB_PRIM_BUF_SIZE + MSM_FB_EXT_BUF_SIZE + \
-				MSM_FB_DSUB_PMEM_ADDER, 4096)
+#define MSM_SMI_BASE            0x38000000
+#define MSM_SMI_SIZE            0x4000000
 
-#define MSM_PMEM_SF_SIZE 0x4000000 /* 64 Mbytes */
-#define MSM_HDMI_PRIM_PMEM_SF_SIZE 0x4000000 /* 64 Mbytes */
+#define MSM_RAM_CONSOLE_BASE    0x77800000
+#define MSM_RAM_CONSOLE_SIZE    SZ_1M
 
-#ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
-unsigned char hdmi_is_primary = 1;
-#else
-unsigned char hdmi_is_primary;
-#endif
+#define MSM_ION_SF_SIZE		0x3700000
+#define MSM_ION_CAMERA_SIZE	0x1000000
+#define MSM_ION_MM_FW_SIZE	0x200000
+#define MSM_ION_MM_SIZE		0x3D00000
+#define MSM_ION_MFC_SIZE	0x100000
+#define MSM_ION_AUDIO_SIZE	0x4CF000
 
-#ifdef CONFIG_FB_MSM_OVERLAY0_WRITEBACK
-#if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
-#define MSM_FB_OVERLAY0_WRITEBACK_SIZE roundup((1632 * 968 * 3 * 2), 4096)
-#else
-#define MSM_FB_OVERLAY0_WRITEBACK_SIZE roundup((832 * 512 * 3 * 2), 4096)
-#endif
-#else
-#define MSM_FB_OVERLAY0_WRITEBACK_SIZE (0)
-#endif  /* CONFIG_FB_MSM_OVERLAY0_WRITEBACK */
-
-#ifdef CONFIG_FB_MSM_OVERLAY1_WRITEBACK
-#define MSM_FB_OVERLAY1_WRITEBACK_SIZE roundup((1920 * 1088 * 3 * 2), 4096)
-#else
-#define MSM_FB_OVERLAY1_WRITEBACK_SIZE (0)
-#endif  /* CONFIG_FB_MSM_OVERLAY1_WRITEBACK */
-
-#define MSM_PMEM_KERNEL_EBI1_SIZE  0x0 //  0x600000 -> 0x0 Not used region
-#ifndef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
-#define MSM_PMEM_ADSP_SIZE         0x4200000
-#else
-#define MSM_PMEM_ADSP_BASE         0x40400000
-#define MSM_PMEM_ADSP_SIZE         0x02A00000 /* 42MB */
-#endif
-#define MSM_PMEM_AUDIO_SIZE        0x28B000
-
-#define MSM_SMI_BASE          0x38000000
-#define MSM_SMI_SIZE          0x4000000
-
-#define KERNEL_SMI_BASE       (MSM_SMI_BASE)
-#define KERNEL_SMI_SIZE       0x600000
-
-#define USER_SMI_BASE         (KERNEL_SMI_BASE + KERNEL_SMI_SIZE)
-#define USER_SMI_SIZE         (MSM_SMI_SIZE - KERNEL_SMI_SIZE)
-#define MSM_PMEM_SMIPOOL_SIZE USER_SMI_SIZE
-
-#define MSM_ION_SF_SIZE		0x4000000 /* 64MB */
-#define MSM_ION_CAMERA_SIZE	0x1200000 /* 18MB */
-#define MSM_ION_MM_FW_SIZE	0x200000 /* (2MB) */
-#define MSM_ION_MM_SIZE		0x3600000 /* (54MB) Must be a multiple of 64K */
-#define MSM_ION_MFC_SIZE	SZ_8K
-#if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
-#define MSM_ION_WB_SIZE 	0x1700000 /* 23MB */
-#else
-#define MSM_ION_WB_SIZE		0x1400000 /* 20MB */
-#endif
-#define MSM_ION_QSECOM_SIZE	0x600000 /* (6MB) */
-#define MSM_ION_AUDIO_SIZE	MSM_PMEM_AUDIO_SIZE
-
-#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-#ifdef CONFIG_QSEECOM
-#define MSM_ION_HEAP_NUM	9
-#else
-#define MSM_ION_HEAP_NUM	8
-#endif
-#define MSM_HDMI_PRIM_ION_SF_SIZE MSM_HDMI_PRIM_PMEM_SF_SIZE
-static unsigned msm_ion_sf_size = MSM_ION_SF_SIZE;
-#else
-#define MSM_ION_HEAP_NUM	1
-#endif
-
-static unsigned fb_size;
-static int __init fb_size_setup(char *p)
-{
-	fb_size = memparse(p, NULL);
-	return 0;
-}
-early_param("fb_size", fb_size_setup);
-
-static unsigned pmem_kernel_ebi1_size = MSM_PMEM_KERNEL_EBI1_SIZE;
-static int __init pmem_kernel_ebi1_size_setup(char *p)
-{
-	pmem_kernel_ebi1_size = memparse(p, NULL);
-	return 0;
-}
-early_param("pmem_kernel_ebi1_size", pmem_kernel_ebi1_size_setup);
-
-#ifdef CONFIG_ANDROID_PMEM
-static unsigned pmem_sf_size = MSM_PMEM_SF_SIZE;
-static int __init pmem_sf_size_setup(char *p)
-{
-	pmem_sf_size = memparse(p, NULL);
-	return 0;
-}
-early_param("pmem_sf_size", pmem_sf_size_setup);
-
-static unsigned pmem_adsp_size = MSM_PMEM_ADSP_SIZE;
-
-static int __init pmem_adsp_size_setup(char *p)
-{
-	pmem_adsp_size = memparse(p, NULL);
-	return 0;
-}
-early_param("pmem_adsp_size", pmem_adsp_size_setup);
-
-static unsigned pmem_audio_size = MSM_PMEM_AUDIO_SIZE;
-
-static int __init pmem_audio_size_setup(char *p)
-{
-	pmem_audio_size = memparse(p, NULL);
-	return 0;
-}
-early_param("pmem_audio_size", pmem_audio_size_setup);
-#endif
+#define MSM_ION_MM_FW_BASE	MSM_SMI_BASE
+#define MSM_ION_MM_BASE		0x38200000
+#define MSM_ION_MFC_BASE	0x3BF00000
 
 static struct resource msm_fb_resources[] = {
 	{
 		.flags  = IORESOURCE_DMA,
 	}
 };
-
-static void set_mdp_clocks_for_wuxga(void);
 
 static int msm_fb_detect_panel(const char *name)
 {
@@ -4133,8 +4014,6 @@ static int msm_fb_detect_panel(const char *name)
 	if (!strncmp(name, HDMI_PANEL_NAME,
 			strnlen(HDMI_PANEL_NAME,
 				PANEL_NAME_MAX_LEN))) {
-		if (hdmi_is_primary)
-			set_mdp_clocks_for_wuxga();
 		return 0;
 	}
 
@@ -4159,51 +4038,6 @@ static struct platform_device msm_fb_device = {
 	.dev.platform_data = &msm_fb_pdata,
 };
 
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-static struct android_pmem_platform_data android_pmem_pdata = {
-	.name = "pmem",
-	.allocator_type = PMEM_ALLOCATORTYPE_ALLORNOTHING,
-	.cached = 1,
-	.memory_type = MEMTYPE_EBI1,
-};
-
-static struct platform_device android_pmem_device = {
-	.name = "android_pmem",
-	.id = 0,
-	.dev = {.platform_data = &android_pmem_pdata},
-};
-
-static struct android_pmem_platform_data android_pmem_adsp_pdata = {
-	.name = "pmem_adsp",
-	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
-	.cached = 0,
-#ifdef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
-	.memory_type = MEMTYPE_PMEM_ADSP,
-#else
-	.memory_type = MEMTYPE_EBI1,
-#endif
-};
-
-static struct platform_device android_pmem_adsp_device = {
-	.name = "android_pmem",
-	.id = 2,
-	.dev = { .platform_data = &android_pmem_adsp_pdata },
-};
-
-static struct android_pmem_platform_data android_pmem_audio_pdata = {
-	.name = "pmem_audio",
-	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
-	.cached = 0,
-	.memory_type = MEMTYPE_EBI1,
-};
-
-static struct platform_device android_pmem_audio_device = {
-	.name = "android_pmem",
-	.id = 4,
-	.dev = { .platform_data = &android_pmem_audio_pdata },
-};
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
 #define PMEM_BUS_WIDTH(_bw) \
 	{ \
 		.vectors = &(struct msm_bus_vectors){ \
@@ -4246,24 +4080,6 @@ void *setup_smi_region(void)
 {
 	return (void *)msm_bus_scale_register_client(&smi_client_pdata);
 }
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-static struct android_pmem_platform_data android_pmem_smipool_pdata = {
-	.name = "pmem_smipool",
-	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
-	.cached = 0,
-	.memory_type = MEMTYPE_SMI,
-	.request_region = request_smi_region,
-	.release_region = release_smi_region,
-	.setup_region = setup_smi_region,
-	.map_on_demand = 1,
-};
-static struct platform_device android_pmem_smipool_device = {
-	.name = "android_pmem",
-	.id = 7,
-	.dev = { .platform_data = &android_pmem_smipool_pdata },
-};
-#endif
-#endif
 
 #define GPIO_DONGLE_PWR_EN 258
 #if !defined(CONFIG_FB_MSM_LCDC_LD9040_WVGA_PANEL) \
@@ -4388,68 +4204,6 @@ static struct platform_device lcdc_auo_wvga_panel_device = {
 
 #if defined (CONFIG_FB_MSM_LCDC_LD9040_WVGA_PANEL) || defined (CONFIG_FB_MSM_LCDC_S6E63M0_WVGA_PANEL)
 
-static int lcdc_gpio_array_num[] = {
-				103, /* spi_clk */
-				104, /* spi_cs  */
-				106, /* spi_mosi */
-				28, /* lcd_reset */
-};
-
-static struct msm_gpio lcdc_gpio_config_data[] = {
-	{ GPIO_CFG(103, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_8MA), "spi_clk" },
-	{ GPIO_CFG(104, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_8MA), "spi_cs0" },
-	{ GPIO_CFG(106, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_8MA), "spi_mosi" },
-	{ GPIO_CFG(28, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_8MA), "lcd_reset" },
-};
-static struct msm_gpio lcdc_gpio_off_config_data[] = {
-	{ GPIO_CFG(103, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), "spi_clk" },
-	{ GPIO_CFG(104, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), "spi_cs0" },
-	{ GPIO_CFG(106, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), "spi_mosi" },
-	{ GPIO_CFG(28, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), "lcd_reset" },
-};
-extern int msm_gpios_request_enable(const struct msm_gpio *table, int size);
-extern void msm_gpios_disable_free(const struct msm_gpio *table, int size);
-static void lcdc_config_gpios(int enable)
-{
-		printk("ld9040 : lcdc_config_gpios [%d]\n", enable);
-	if (enable) 
-	{
-			int i;
-			int loop_count= ARRAY_SIZE(lcdc_gpio_config_data);
-			for( i=0; i<loop_count; i++)
-			{
-					gpio_tlmm_config(lcdc_gpio_config_data[i].gpio_cfg, 1);
-			}
-#if 0	
-		msm_gpios_request_enable(lcdc_gpio_config_data,
-						  ARRAY_SIZE(
-							  lcdc_gpio_config_data));
-#endif						      
-	} 
-	else
-	{
-			int i;
-			int loop_count= ARRAY_SIZE(lcdc_gpio_off_config_data);
-			for( i=0; i<loop_count; i++)
-			{
-					gpio_tlmm_config(lcdc_gpio_off_config_data[i].gpio_cfg, 1);
-			}
-	
-#if 0	
-		msm_gpios_disable_free(lcdc_gpio_config_data,
-						ARRAY_SIZE(
-							lcdc_gpio_config_data));
-#endif						    
-		}
-}
-
-static struct msm_panel_common_pdata lcdc_panel_data = {
-#ifndef CONFIG_SPI_QSD
-	.panel_config_gpio = lcdc_config_gpios,
-	.gpio_num          = lcdc_gpio_array_num,
-#endif
-};
-
 #if defined (CONFIG_FB_MSM_LCDC_S6E63M0_WVGA_PANEL)
 static struct platform_device lcdc_ld9040_panel_device = {
 	.name   = "lcdc_S6E63M0_wvga",
@@ -4461,9 +4215,6 @@ static struct platform_device lcdc_ld9040_panel_device = {
 static struct platform_device lcdc_ld9040_panel_device = {
 	.name   = "lcdc_ld9040_wvga",
 	.id     = 0,
-	.dev    = {
-		.platform_data = &lcdc_panel_data,
-	}
 #endif
 };
 #endif
@@ -5127,38 +4878,18 @@ static struct platform_device mipi_dsi_s6e8aa0_hd720_panel_device = {
 #endif
 #endif
 
-#ifndef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION /* onlyjazz.ub02 : workaournd for kernel memory crash by TZBSP XPU */
-
-#define TZBSP_EXEC_BASE 0x42E20000
-#define TZBSP_EXEC_SIZE 0x000E0000
-
-#endif /* onlyjazz.ub02 : end */
-
 static void __init msm8x60_allocate_memory_regions(void)
 {
 	void *addr;
 	unsigned long size;
-	
-#ifndef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION /* onlyjazz.ub02 : workaournd for kernel memory crash by TZBSP XPU */
-    int ret;
-	 ret = reserve_bootmem(TZBSP_EXEC_BASE, TZBSP_EXEC_SIZE, BOOTMEM_EXCLUSIVE);
-	 if (ret < 0) {
-		  printk(KERN_ERR "reserve_bootmem for TZBSP EXEC BASE failed\n");
-	 }
 
-#endif /* onlyjazz.ub02 : end */
-
-	if (hdmi_is_primary)
-		size = roundup((1920 * 1088 * 4 * 2), 4096);
-	else
-		size = MSM_FB_SIZE;
+	size = MSM_FB_SIZE;
 
 	addr = alloc_bootmem_align(size, 0x1000);
 	msm_fb_resources[0].start = __pa(addr);
 	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
 	pr_info("allocating %lu bytes at %p (%lx physical) for fb\n",
 		size, addr, __pa(addr));
-
 }
 
 void __init msm8x60_set_display_params(char *prim_panel, char *ext_panel)
@@ -5168,16 +4899,8 @@ void __init msm8x60_set_display_params(char *prim_panel, char *ext_panel)
 			PANEL_NAME_MAX_LEN);
 		pr_debug("msm_fb_pdata.prim_panel_name %s\n",
 			msm_fb_pdata.prim_panel_name);
-
-		if (!strncmp((char *)msm_fb_pdata.prim_panel_name,
-			HDMI_PANEL_NAME, strnlen(HDMI_PANEL_NAME,
-				PANEL_NAME_MAX_LEN))) {
-			pr_debug("HDMI is the primary display by"
-				" boot parameter\n");
-			hdmi_is_primary = 1;
-			set_mdp_clocks_for_wuxga();
-		}
 	}
+
 	if (strnlen(ext_panel, PANEL_NAME_MAX_LEN)) {
 		strlcpy(msm_fb_pdata.ext_panel_name, ext_panel,
 			PANEL_NAME_MAX_LEN);
@@ -5479,7 +5202,7 @@ static void mxt224_power_on(void)
 	// int ret;
 	int rc;
 	struct regulator *L1;
-	struct regulator *L4;	
+	struct regulator *L4;
 	// static struct regulator *tsp_pannel_pwr_reg;
 
 	printk("%s: enter\n", __func__);
@@ -5491,7 +5214,7 @@ static void mxt224_power_on(void)
 						   __func__, rc);
 					return;
 				}
-				
+
 				rc = regulator_set_voltage(L1,3300000, 3300000);
 				if (rc) {
 					printk("%s: debug p1\n", __func__);
@@ -5560,7 +5283,7 @@ static void mxt224_power_on(void)
 						return;
 					}
 	}
-	
+
 				if(regulator_is_enabled(L4)){
 					printk(KERN_ERR "[TSP POWER ON   L4 1.8 was already enabled\n");
 				} else {
@@ -5593,7 +5316,7 @@ static void mxt224_power_off(void)
 	// int ret;
 	int rc;
 	struct regulator *L1;
-	struct regulator *L4;	
+	struct regulator *L4;
 
 	printk("%s: enter\n", __func__);
 #if defined (CONFIG_USA_MODEL_SGH_I727)  || defined(CONFIG_USA_MODEL_SGH_I577)
@@ -5604,7 +5327,7 @@ static void mxt224_power_off(void)
 	if(get_hw_rev()<0x04)
 #endif
 	{
-		printk("mxt224_power_off was skipped because hw rev is lower than 03\n"); 
+		printk("mxt224_power_off was skipped because hw rev is lower than 03\n");
 		return;
 	}
 
@@ -5627,9 +5350,9 @@ static void mxt224_power_off(void)
 			//printk("mxt224_power_off : I9210 Rev02 8058_l4 \n");
 		}
 		else {
-			L4 = regulator_get(NULL, "8058_l17");			
+			L4 = regulator_get(NULL, "8058_l17");
 			//printk("mxt224_power_off : I9210 Rev02 8058_l17 \n");
-		}			 
+		}
 #else
 #if defined (CONFIG_USA_MODEL_SGH_I727) || defined(CONFIG_USA_MODEL_SGH_I577)
 		if (get_hw_rev()>=0x06)
@@ -5659,7 +5382,7 @@ static void mxt224_power_off(void)
 			rc = regulator_set_voltage(L4, 2850000, 2850000);
 		}
 		else {
-			rc = regulator_set_voltage(L4, 1800000, 1800000);					 
+			rc = regulator_set_voltage(L4, 1800000, 1800000);
 		}
 #else
 		rc = regulator_set_voltage(L4, 1800000, 1800000);
@@ -5703,7 +5426,7 @@ static void mxt224_power_off(void)
 	}
 
 	}
-	printk("mxt224_power_off is finished\n"); 
+	printk("mxt224_power_off is finished\n");
 }
 
 #define MXT224_MAX_MT_FINGERS 10
@@ -5733,11 +5456,11 @@ static const u8 *mxt224_config[] = {
 	t7_config,
 	t8_config,
 	t9_config,
-	t15_config,	
+	t15_config,
 	t18_config,
 	t20_config,
 	t22_config,
-	t23_config,	
+	t23_config,
 	t28_config,
 	end_config,
 };
@@ -5745,7 +5468,7 @@ static const u8 *mxt224_config[] = {
 /*
 	Configuration for MXT224-E
 */
-#if defined (CONFIG_USA_MODEL_SGH_I577) || defined(CONFIG_CAN_MODEL_SGH_I577R)	
+#if defined (CONFIG_USA_MODEL_SGH_I577) || defined(CONFIG_CAN_MODEL_SGH_I577R)
 static u8 t7_config_e[] = {GEN_POWERCONFIG_T7,
 				48,		/* IDLEACQINT */
 				255,	/* ACTVACQINT */
@@ -5756,12 +5479,12 @@ static u8 t8_config_e[] = {GEN_ACQUISITIONCONFIG_T8,
 /* NEXTTCHDI added */
 static u8 t9_config_e[] = {TOUCH_MULTITOUCHSCREEN_T9,
 				139, 0, 0, 19, 11, 0, 32/*16*/, 50/*45*/, 2, 1,
-				10, 
+				10,
 				15,		/* MOVHYSTI */
 				1, 81/*80*/, MXT224_MAX_MT_FINGERS, 5, 40, 10, 31, 3,
 				223, 1, 10, 10, 10, 10, 143, 40, 143, 80,
 				18, 15, 50, 50, 0/*1*/};
-	
+
 
 static u8 t15_config_e[] = {TOUCH_KEYARRAY_T15,	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 static u8 t18_config_e[] = {SPT_COMCONFIG_T18, 0, 0};
@@ -5782,9 +5505,9 @@ static u8 t48_config_e_ta[] = {PROCG_NOISESUPPRESSION_T48,
 				0, 0, 0, 6, 6, 0, 0, 64, 4, 64,
 				10, 0, 15/*20120228 9*/, 5, 0, 20/*20120228 15*/, 0, 20, 0, 0,//110927 gumi noise
 				0, 0, 0, 0, 0, 32, 2,/*blen=0,threshold=50*/
-				15,		/* MOVHYSTI */ 
+				15,		/* MOVHYSTI */
 				1, 47,  // MoveFilter 46->47, for chargeing
-				10, 5, 40, 235,/*20120209 240,*/ 235,/*20120209 245,*/ 10, 10, 
+				10, 5, 40, 235,/*20120209 240,*/ 235,/*20120209 245,*/ 10, 10,
 				160,/*20120209 148,*/ 60,/*20120209 50,*/ 143,
 				80, 18, 15, 0};
 
@@ -5793,7 +5516,7 @@ static u8 t48_config_e[] = {PROCG_NOISESUPPRESSION_T48,
    				0, 0, 0, 6, 6, 0, 0, 64/* 20120209 48*//*64*/, 4, 64/* 20120209 48*//*64*/,
 				10, 0, 15/*20*/, 5, 0, 30/*38*/, 0, 1,/*20120209 5,*/ 0, 0,  /*byte 27 original value 20*/
 				0, 0, 0, 0, 32, 50, 2,
-				15,		
+				15,
 				1, 50,
 				MXT224_MAX_MT_FINGERS, 5, 40, 10, 10, 10, 10, 143, 40, 143,
 				80, 18, 15, 0};
@@ -5827,7 +5550,7 @@ static u8 t8_config_e[] = {GEN_ACQUISITIONCONFIG_T8,
 /* NEXTTCHDI added */
 static u8 t9_config_e[] = {TOUCH_MULTITOUCHSCREEN_T9,
 				139, 0, 0, 19, 11, 0, 32, MXT224E_THRESHOLD, 2, 1,
-				10, 
+				10,
 				15,		/* MOVHYSTI */
 				1, 46, MXT224_MAX_MT_FINGERS, 5, 40, 10, 31, 3,
 				223, 1, 10, 10, 10, 10, 143, 40, 143, 80,
@@ -5852,7 +5575,7 @@ static u8 t48_config_e_ta[] = {PROCG_NOISESUPPRESSION_T48,
 				0, 0, 0, 6, 6, 0, 0, 64, 4, 64,
 				10, 0, 9, 5, 0, 15, 0, 20, 0, 0,//110927 gumi noise
 				0, 0, 0, 0, 0, 40, 2,/*blen=0,threshold=50*/
-				15,		/* MOVHYSTI */ 
+				15,		/* MOVHYSTI */
 				1, 47,  // MoveFilter 46->47, for chargeing
 				10, 5, 40, 240, 245, 10, 10, 148, 50, 143,
 				80, 18, 15, 0};
@@ -5862,7 +5585,7 @@ static u8 t48_config_e[] = {PROCG_NOISESUPPRESSION_T48,
     0, 0, 0, 6, 6, 0, 0, 64, 4, 64,
 				10, 0, 20, 5, 0, 38, 0, 5, 0, 0,  /*byte 27 original value 20*/
 				0, 0, 0, 0, 32, MXT224E_THRESHOLD, 2,
-				15,		
+				15,
 				1, 46,
 				MXT224_MAX_MT_FINGERS, 5, 40, 10, 10, 10, 10, 143, 40, 143,
 				80, 18, 15, 0};
@@ -5890,15 +5613,14 @@ static const u8 *mxt224e_config[] = {
 void mxt224_orient_branch(int orient_swap)
 {
 	if (orient_swap == MXT224_ORIENT_SWAP_NN ){
-		t9_config[MXT_OREINT]= MXT224_ORIENT_SWAP_NN; 
-		t9_config_e[MXT_OREINT]= MXT224_ORIENT_SWAP_NN; 
-	}else if(orient_swap == MXT224_ORIENT_SWAP_XY ){			
-		// default 
-		t9_config[MXT_OREINT]= MXT224_ORIENT_SWAP_XY; 
-		t9_config_e[MXT_OREINT]= MXT224_ORIENT_SWAP_XY; 
+		t9_config[MXT_OREINT]= MXT224_ORIENT_SWAP_NN;
+		t9_config_e[MXT_OREINT]= MXT224_ORIENT_SWAP_NN;
+	}else if(orient_swap == MXT224_ORIENT_SWAP_XY ){
+		// default
+		t9_config[MXT_OREINT]= MXT224_ORIENT_SWAP_XY;
+		t9_config_e[MXT_OREINT]= MXT224_ORIENT_SWAP_XY;
 	}
 }
-
 
 static void mxt224_register_callback(void *function)
 {
@@ -5924,13 +5646,12 @@ void tsp_set_unknown_charging_cable(bool set)
 	is_cable_attached =  set;
 }
 
-
 static struct mxt224_platform_data mxt224_data = {
 	.max_finger_touches = MXT224_MAX_MT_FINGERS,
 	.gpio_read_done = TOUCHSCREEN_IRQ,
 	.config = mxt224_config,
 	.config_e = mxt224e_config,
-	.t48_ta_cfg = t48_config_e_ta,	
+	.t48_ta_cfg = t48_config_e_ta,
 	.min_x = 0,
 #if defined(CONFIG_TOUCHSCREEN_MXT768E)
 	.max_x = 1023,
@@ -5974,7 +5695,7 @@ static struct qt602240_platform_data qt602240_pdata = {
 static struct i2c_board_info qt602240_board_info[] = {
 	{
 		I2C_BOARD_INFO("qt602240_ts", 0x4a),
-		.irq           =  MSM_GPIO_TO_INT(TOUCHSCREEN_IRQ),			
+		.irq           =  MSM_GPIO_TO_INT(TOUCHSCREEN_IRQ),
 		.platform_data = &mxt224_data
 	}
 };
@@ -6949,7 +6670,7 @@ static struct platform_device akm_i2c_gpio_device = {
 
 static struct akm8975_platform_data akm8975_pdata = {
 	.gpio_data_ready_gpio = PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_MSENSE_RST),
-	.gpio_data_ready_int = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, PMIC_GPIO_MSENSE_RST),
+    .gpio_data_ready_int = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, PMIC_GPIO_MSENSE_RST),
 	.power_on = sensor_power_on,
 	.power_off = sensor_power_off,
 	.power_on_mag = sensor_power_on_mag,
@@ -7385,7 +7106,7 @@ static struct snd_set_ampgain init_ampgain[] = {
 		.in2_gain = 2,
 		.hp_att = 0,
 		.hp_gainup = 0,
-		.sp_att = 31,
+		.sp_att = 30,
 		.sp_gainup = 0,
 	},
     // HEADSET
@@ -7501,7 +7222,6 @@ static struct i2c_board_info motor_i2c_borad_info[] = {
 };
 
 #ifdef CONFIG_SERIAL_MSM_HS
-#if 0 //SAMSUNG_BT_CONFIG
 static int configure_uart_gpios(int on)
 {
 	int ret = 0, i;
@@ -7522,13 +7242,30 @@ static int configure_uart_gpios(int on)
 			msm_gpiomux_put(uart_gpios[i]);
 	return ret;
 }
-#endif
+
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
-       .inject_rx_on_wakeup = 1,
-       .rx_to_inject = 0xFD,
-#if 0 //SAMSUNG_BT_CONFIG
-       .gpio_config = configure_uart_gpios,
-#endif
+	.wakeup_irq = -1,
+	.inject_rx_on_wakeup = 0,
+	.gpio_config = configure_uart_gpios,
+	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
+};
+
+#define GPIO_BT_WAKE        86
+#define GPIO_BT_HOST_WAKE   127
+
+static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = GPIO_BT_WAKE,
+	.gpio_host_wake = GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device msm_bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+	},
 };
 #endif
 
@@ -7982,8 +7719,8 @@ static struct regulator_consumer_supply vreg_consumers_PM8901_S4_PC[] = {
 /* RPM early regulator constraints */
 static struct rpm_regulator_init_data rpm_regulator_early_init_data[] = {
 	/*	 ID       a_on pd ss min_uV   max_uV   init_ip    freq */
-	RPM_SMPS(PM8058_S0, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 1p60),
-	RPM_SMPS(PM8058_S1, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 1p60),
+	RPM_SMPS(PM8058_S0, 0, 1, 1,  700000, 1400000, SMPS_HMIN, 1p60),
+	RPM_SMPS(PM8058_S1, 0, 1, 1,  700000, 1400000, SMPS_HMIN, 1p60),
 };
 
 /* RPM regulator constraints */
@@ -8002,7 +7739,7 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 	RPM_LDO(PM8058_L9,  0, 1, 0, 3000000, 3000000, LDO300HMIN),
 	RPM_LDO(PM8058_L10, 0, 1, 0, 1500000, 2600000, LDO300HMIN),
 	RPM_LDO(PM8058_L11, 0, 1, 0, 2850000, 2850000, LDO150HMIN),
-	RPM_LDO(PM8058_L12, 0, 1, 0, 2000000, 3300000, LDO150HMIN),
+	RPM_LDO(PM8058_L12, 0, 1, 0, 3300000, 3300000, LDO150HMIN),
 	RPM_LDO(PM8058_L13, 0, 1, 0, 2050000, 2050000, LDO300HMIN),
 	RPM_LDO(PM8058_L14, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
 	RPM_LDO(PM8058_L15, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
@@ -8012,7 +7749,7 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 #if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 	RPM_LDO(PM8058_L19, 0, 1, 0, 3000000, 3300000, LDO150HMIN),
 #elif defined (CONFIG_KOR_MODEL_SHV_E110S) || defined (CONFIG_TARGET_LOCALE_USA)
-	RPM_LDO(PM8058_L19, 0, 1, 0, 3000000, 3000000, LDO150HMIN),
+	RPM_LDO(PM8058_L19, 0, 1, 0, 2500000, 3000000, LDO150HMIN),
 #else
 	RPM_LDO(PM8058_L19, 0, 1, 0, 2500000, 2500000, LDO150HMIN),
 #endif
@@ -8044,12 +7781,12 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 #else
 	RPM_LDO(PM8901_L3,  0, 1, 0, 3300000, 3300000, LDO300HMIN),
 #endif
-	RPM_LDO(PM8901_L4,  0, 1, 0, 1800000, 2800000, LDO300HMIN),
+	RPM_LDO(PM8901_L4,  0, 1, 0, 1800000, 1800000, LDO300HMIN),
 	RPM_LDO(PM8901_L5,  0, 1, 0, 2850000, 2850000, LDO300HMIN),
 #if defined(CONFIG_USA_MODEL_SGH_I757)
 	RPM_LDO(PM8901_L6,  0, 1, 0, 3000000, 3000000, LDO300HMIN),
 #else
-	RPM_LDO(PM8901_L6,  0, 1, 0, 2400000, 2400000, LDO300HMIN),
+	RPM_LDO(PM8901_L6,  0, 1, 0, 2200000, 2200000, LDO300HMIN),
 #endif
 
 	/*	 ID       a_on pd ss min_uV   max_uV   init_ip   freq */
@@ -8145,9 +7882,11 @@ static struct platform_device bcm4330_bluetooth_device = {
 };
 #endif
 
-static struct platform_device msm_tsens_device = {
-	.name   = "tsens-tm",
-	.id = -1,
+static struct tsens_platform_data msm_tsens_pdata  = {
+		.slope 			= {702, 702, 702, 702, 702},
+		.tsens_factor		= 1000,
+		.hw_type		= MSM_8660,
+		.tsens_num_sensor	= 6,
 };
 
 #ifdef CONFIG_VP_A2220
@@ -8283,14 +8022,6 @@ static struct platform_device *rumi_sim_devices[] __initdata = {
 
 #ifdef CONFIG_I2C_SSBI
 	&msm_device_ssbi3,
-#endif
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-	&android_pmem_device,
-	&android_pmem_adsp_device,
-	&android_pmem_smipool_device,
-	&android_pmem_audio_device,
-#endif
 #endif
 #ifdef CONFIG_MSM_ROTATOR
 	&msm_rotator_device,
@@ -9454,16 +9185,21 @@ static struct i2c_board_info melfas_board_info[] = {
 };
 #endif
 
+static struct resource ram_console_resources[] = {
+	{
+		.start	= MSM_RAM_CONSOLE_BASE,
+		.end	= MSM_RAM_CONSOLE_BASE + MSM_RAM_CONSOLE_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
 
+static struct platform_device ram_console_device = {
+	.name		= "ram_console",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(ram_console_resources),
+	.resource	= ram_console_resources,
+};
 
-
-
-
-
-
-
-
-//*********
 static struct platform_device *charm_devices[] __initdata = {
 	&msm_charm_modem,
 #ifdef CONFIG_MSM_SDIO_AL
@@ -9495,6 +9231,7 @@ static struct platform_device *asoc_devices[] __initdata = {
 };
 
 static struct platform_device *surf_devices[] __initdata = {
+	&ram_console_device,
 	&msm_device_smd,
 	&msm_device_uart_dm12,
 	&msm_pil_q6v3,
@@ -9522,6 +9259,7 @@ static struct platform_device *surf_devices[] __initdata = {
 #endif
 #ifdef CONFIG_SERIAL_MSM_HS
 	&msm_device_uart_dm1,
+	&msm_bcm_bt_lpm_device,
 #endif
 #ifdef CONFIG_MSM_SSBI
 	&msm_device_ssbi_pmic1,
@@ -9562,14 +9300,6 @@ static struct platform_device *surf_devices[] __initdata = {
 	&usb_i2c_gpio_device,
 #endif
 	&sec_device_switch,  // samsung switch driver
-#endif
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-	&android_pmem_device,
-	&android_pmem_adsp_device,
-	&android_pmem_smipool_device,
-	&android_pmem_audio_device,
-#endif
 #endif
 #ifdef CONFIG_MSM_ROTATOR
 	&msm_rotator_device,
@@ -9676,7 +9406,6 @@ static struct platform_device *surf_devices[] __initdata = {
 	&msm_device_rng,
 #endif
 
-	&msm_tsens_device,
 	&msm_rpm_device,
 #ifdef CONFIG_ION_MSM
 	&ion_dev,
@@ -9685,9 +9414,11 @@ static struct platform_device *surf_devices[] __initdata = {
 #if defined (CONFIG_SAMSUNG_JACK) || defined (CONFIG_SAMSUNG_EARJACK)
 	&sec_device_jack,
 #endif
+/*
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 	&sec_device_mipi_esd,
 #endif
+*/
 #if defined (CONFIG_OPTICAL_GP2A)|| defined(CONFIG_OPTICAL_GP2AP020A00F)
 	&opt_i2c_gpio_device,
 	&opt_gp2a,
@@ -9716,24 +9447,14 @@ static struct platform_device *surf_devices[] __initdata = {
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
 static struct ion_cp_heap_pdata cp_mm_ion_pdata = {
 	.permission_type = IPT_TYPE_MM_CARVEOUT,
-	.align = SZ_64K,
-	.request_region = request_smi_region,
-	.release_region = release_smi_region,
-	.setup_region = setup_smi_region,
-	.iommu_map_all = 1,
-	.iommu_2x_map_domain = VIDEO_DOMAIN,
-};
-
-static struct ion_cp_heap_pdata cp_mfc_ion_pdata = {
-	.permission_type = IPT_TYPE_MFC_SHAREDMEM,
 	.align = PAGE_SIZE,
 	.request_region = request_smi_region,
 	.release_region = release_smi_region,
 	.setup_region = setup_smi_region,
 };
 
-static struct ion_cp_heap_pdata cp_wb_ion_pdata = {
-	.permission_type = IPT_TYPE_MDP_WRITEBACK,
+static struct ion_cp_heap_pdata cp_mfc_ion_pdata = {
+	.permission_type = IPT_TYPE_MFC_SHAREDMEM,
 	.align = PAGE_SIZE,
 };
 
@@ -9759,91 +9480,68 @@ static struct ion_co_heap_pdata co_ion_pdata = {
  * to each other.
  * Don't swap the order unless you know what you are doing!
  */
+static struct ion_platform_heap msm8x60_heaps[] = {
+	{
+		.id	= ION_SYSTEM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_SYSTEM,
+		.name	= ION_VMALLOC_HEAP_NAME,
+	},
+	{
+		.id	= ION_CP_MM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MM_HEAP_NAME,
+		.base	= MSM_ION_MM_BASE,
+		.size	= MSM_ION_MM_SIZE,
+		.memory_type = ION_SMI_TYPE,
+		.extra_data = (void *) &cp_mm_ion_pdata,
+	},
+	{
+		.id	= ION_MM_FIRMWARE_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_MM_FIRMWARE_HEAP_NAME,
+		.base   = MSM_ION_MM_FW_BASE,
+		.size	= MSM_ION_MM_FW_SIZE,
+		.memory_type = ION_SMI_TYPE,
+		.extra_data = (void *) &fw_co_ion_pdata,
+	},
+	{
+		.id	= ION_CP_MFC_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MFC_HEAP_NAME,
+		.base	= MSM_ION_MFC_BASE,
+		.size	= MSM_ION_MFC_SIZE,
+		.memory_type = ION_SMI_TYPE,
+		.extra_data = (void *) &cp_mfc_ion_pdata,
+	},
+	{
+		.id	= ION_SF_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_SF_HEAP_NAME,
+		.size	= MSM_ION_SF_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *)&co_ion_pdata,
+	},
+	{
+		.id	= ION_CAMERA_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_CAMERA_HEAP_NAME,
+		.size	= MSM_ION_CAMERA_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = &co_ion_pdata,
+	},
+	{
+		.id	= ION_AUDIO_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_AUDIO_HEAP_NAME,
+		.size	= MSM_ION_AUDIO_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *)&co_ion_pdata,
+	},
+};
+
 static struct ion_platform_data ion_pdata = {
-	.nr = MSM_ION_HEAP_NUM,
-	.heaps = {
-		{
-			.id	= ION_SYSTEM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_SYSTEM,
-			.name	= ION_VMALLOC_HEAP_NAME,
-		},
-#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		{
-			.id	= ION_CP_MM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MM_HEAP_NAME,
-			.size	= MSM_ION_MM_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &cp_mm_ion_pdata,
-		},
-		{
-			.id	= ION_MM_FIRMWARE_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_MM_FIRMWARE_HEAP_NAME,
-			.size	= MSM_ION_MM_FW_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &fw_co_ion_pdata,
-		},
-		{
-			.id	= ION_CP_MFC_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MFC_HEAP_NAME,
-			.size	= MSM_ION_MFC_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &cp_mfc_ion_pdata,
-		},
-		{
-			.id	= ION_SF_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_SF_HEAP_NAME,
-			.size	= MSM_ION_SF_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *)&co_ion_pdata,
-		},
-		{
-			.id	= ION_CP_WB_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_WB_HEAP_NAME,
-			.size	= MSM_ION_WB_SIZE,
-#ifdef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
-			.memory_type = ION_ADSP_TYPE,
-#else
-			.memory_type = ION_EBI_TYPE,
-#endif
-			.extra_data = (void *) &cp_wb_ion_pdata,
-		},
-		{
-			.id	= ION_CAMERA_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_CAMERA_HEAP_NAME,
-			.size	= MSM_ION_CAMERA_SIZE,
-#ifdef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
-			.memory_type = ION_ADSP_TYPE,
-#else
-			.memory_type = ION_EBI_TYPE,
-#endif
-			.extra_data = &co_ion_pdata,
-		},
-#ifdef CONFIG_QSEECOM
-		{
-			.id	= ION_QSECOM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_QSECOM_HEAP_NAME,
-			.size	= MSM_ION_QSECOM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_ion_pdata,
-		},
-#endif
-		{
-			.id	= ION_AUDIO_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_AUDIO_HEAP_NAME,
-			.size	= MSM_ION_AUDIO_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *)&co_ion_pdata,
-		},
-#endif
-	}
+        .nr = MSM_ION_HEAP_NUM,
+        .heaps = msm8x60_heaps,
 };
 
 static struct platform_device ion_dev = {
@@ -9853,33 +9551,12 @@ static struct platform_device ion_dev = {
 };
 #endif
 
-
 static struct memtype_reserve msm8x60_reserve_table[] __initdata = {
-	/* Kernel SMI memory pool for video core, used for firmware */
-	/* and encoder, decoder scratch buffers */
-	/* Kernel SMI memory pool should always precede the user space */
-	/* SMI memory pool, as the video core will use offset address */
-	/* from the Firmware base */
-	[MEMTYPE_SMI_KERNEL] = {
-		.start	=	KERNEL_SMI_BASE,
-		.limit	=	KERNEL_SMI_SIZE,
-		.size	=	KERNEL_SMI_SIZE,
-		.flags	=	MEMTYPE_FLAGS_FIXED,
-	},
-	/* User space SMI memory pool for video core */
-	/* used for encoder, decoder input & output buffers  */
 	[MEMTYPE_SMI] = {
-		.start	=	USER_SMI_BASE,
-		.limit	=	USER_SMI_SIZE,
+		.start	=	MSM_SMI_BASE,
+		.limit	=	MSM_SMI_SIZE,
 		.flags	=	MEMTYPE_FLAGS_FIXED,
 	},
-#ifdef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
-	[MEMTYPE_PMEM_ADSP] = {
-		.start	=	MSM_PMEM_ADSP_BASE,
-		.limit	=	MSM_PMEM_ADSP_SIZE,
-		.flags	=	MEMTYPE_FLAGS_FIXED,
-	},
-#endif
 	[MEMTYPE_EBI0] = {
 		.flags	=	MEMTYPE_FLAGS_1M_ALIGN,
 	},
@@ -9890,110 +9567,19 @@ static struct memtype_reserve msm8x60_reserve_table[] __initdata = {
 
 static void reserve_ion_memory(void)
 {
-#if defined(CONFIG_ION_MSM) && defined(CONFIG_MSM_MULTIMEDIA_USE_ION)
-	unsigned int i;
-
-	if (hdmi_is_primary) {
-		msm_ion_sf_size = MSM_HDMI_PRIM_ION_SF_SIZE;
-		for (i = 0; i < ion_pdata.nr; i++) {
-			if (ion_pdata.heaps[i].id == ION_SF_HEAP_ID) {
-				ion_pdata.heaps[i].size = msm_ion_sf_size;
-				pr_debug("msm_ion_sf_size 0x%x\n",
-					msm_ion_sf_size);
-				break;
-			}
-		}
-	}
-
-	/* Verify size of heap is a multiple of 64K */
-	for (i = 0; i < ion_pdata.nr; i++) {
-		struct ion_platform_heap *heap = &(ion_pdata.heaps[i]);
-
-		if (heap->extra_data && heap->type == ION_HEAP_TYPE_CP) {
-			int map_all = ((struct ion_cp_heap_pdata *)
-				heap->extra_data)->iommu_map_all;
-
-			if (map_all && (heap->size & (SZ_64K-1))) {
-				heap->size = ALIGN(heap->size, SZ_64K);
-				pr_err("Heap %s size is not a multiple of 64K. Adjusting size to %x\n",
-					heap->name, heap->size);
-
-			}
-		}
-	}
-
-	msm8x60_reserve_table[MEMTYPE_EBI1].size += msm_ion_sf_size;
-	msm8x60_reserve_table[MEMTYPE_SMI].size += MSM_ION_MM_FW_SIZE;
-	msm8x60_reserve_table[MEMTYPE_SMI].size += MSM_ION_MM_SIZE;
-	msm8x60_reserve_table[MEMTYPE_SMI].size += MSM_ION_MFC_SIZE;
-#ifndef CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION
 	msm8x60_reserve_table[MEMTYPE_EBI1].size += MSM_ION_CAMERA_SIZE;
-	msm8x60_reserve_table[MEMTYPE_EBI1].size += MSM_ION_WB_SIZE;
-#else
-	msm8x60_reserve_table[MEMTYPE_PMEM_ADSP].size += MSM_ION_CAMERA_SIZE;
-	msm8x60_reserve_table[MEMTYPE_PMEM_ADSP].size += MSM_ION_WB_SIZE;
-#endif
-#ifdef CONFIG_QSEECOM
-	msm8x60_reserve_table[MEMTYPE_EBI1].size += MSM_ION_QSECOM_SIZE;
-#endif
+	msm8x60_reserve_table[MEMTYPE_EBI1].size += MSM_ION_SF_SIZE;
 	msm8x60_reserve_table[MEMTYPE_EBI1].size += MSM_ION_AUDIO_SIZE;
-#endif
 }
-
-static void __init size_pmem_devices(void)
-{
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-	android_pmem_adsp_pdata.size = pmem_adsp_size;
-	android_pmem_smipool_pdata.size = MSM_PMEM_SMIPOOL_SIZE;
-
-	if (hdmi_is_primary)
-		pmem_sf_size = MSM_HDMI_PRIM_PMEM_SF_SIZE;
-	android_pmem_pdata.size = pmem_sf_size;
-	android_pmem_audio_pdata.size = MSM_PMEM_AUDIO_SIZE;
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
-}
-
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-static void __init reserve_memory_for(struct android_pmem_platform_data *p)
-{
-	msm8x60_reserve_table[p->memory_type].size += p->size;
-}
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
-
-static void __init reserve_pmem_memory(void)
-{
-#ifdef CONFIG_ANDROID_PMEM
-#ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
-	reserve_memory_for(&android_pmem_adsp_pdata);
-	reserve_memory_for(&android_pmem_smipool_pdata);
-	reserve_memory_for(&android_pmem_pdata);
-	reserve_memory_for(&android_pmem_audio_pdata);
-#endif
-	msm8x60_reserve_table[MEMTYPE_EBI1].size += pmem_kernel_ebi1_size;
-#endif
-}
-
-static void __init reserve_mdp_memory(void);
 
 static void __init msm8x60_calculate_reserve_sizes(void)
 {
-	size_pmem_devices();
-	reserve_pmem_memory();
 	reserve_ion_memory();
-	reserve_mdp_memory();
 }
 
 static int msm8x60_paddr_to_memtype(unsigned int paddr)
 {
-#if defined (CONFIG_SEC_KERNEL_REBASE_FOR_PMEM_OPTIMIZATION)
-	if (paddr >= 0x40000000 && paddr < 0x80000000)
-#else
 	if (paddr >= 0x40000000 && paddr < 0x60000000)
-#endif
 		return MEMTYPE_EBI1;
 	if (paddr >= 0x38000000 && paddr < 0x40000000)
 		return MEMTYPE_SMI;
@@ -10026,9 +9612,14 @@ early_param("ext_display", ext_display_setup);
 
 static void __init msm8x60_reserve(void)
 {
+	int ret;
+
 	msm8x60_set_display_params(prim_panel_name, ext_panel_name);
 	reserve_info = &msm8x60_reserve_info;
 	msm_reserve();
+
+	ret = memblock_remove(MSM_RAM_CONSOLE_BASE, MSM_RAM_CONSOLE_SIZE);
+	BUG_ON(ret);
 }
 
 #define EXT_CHG_VALID_MPP 10
@@ -10506,7 +10097,7 @@ static int pm8058_gpios_init(void)
 pr_err("%s PMIC_GPIO_EAR_DET : OK \n", __func__);
 	sec_jack_gpio_init();
 #endif
-
+/*
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 	rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_ESD_DET), &sec_mipi_esd_det_gpio_cfg);
 	if (rc) {
@@ -10514,7 +10105,7 @@ pr_err("%s PMIC_GPIO_EAR_DET : OK \n", __func__);
 		return rc;
 	}
 #endif
-
+*/
 #if defined(CONFIG_HAPTIC_ISA1200) || \
 			defined(CONFIG_HAPTIC_ISA1200_MODULE)
 	if (machine_is_msm8x60_fluid()) {
@@ -11611,7 +11202,57 @@ static void msm_timpani_shutdown_power(void)
 
 	regulator_put(vreg_timpani_2);
 }
+/* Qualcomm i2c patch begins */
 
+
+
+static unsigned int msm_timpani_reset(void)
+{
+	int rc;
+
+	rc = regulator_is_enabled(vreg_timpani_1);
+	if (rc <= 0) {
+		rc = regulator_set_voltage(vreg_timpani_1, 1200000, 1200000);
+		if (rc) {
+			pr_err("%s: unable to set L0 voltage to 1.2V\n",
+								__func__);
+			return rc;
+		}
+		rc = regulator_enable(vreg_timpani_1);
+		if (rc) {
+			pr_err("%s: Enable regulator 8058_l0 failed\n",
+								__func__);
+			return rc;
+		}
+	}
+
+	rc = regulator_is_enabled(vreg_timpani_2);
+	if (rc <= 0) {
+		rc = regulator_set_voltage(vreg_timpani_2, 1800000, 1800000);
+		if (rc) {
+			pr_err("%s: unable to set s3 voltage to 1.8V\n",
+								__func__);
+			goto fail;
+		}
+		rc = regulator_enable(vreg_timpani_2);
+		if (rc) {
+			pr_err("%s: Enable regulator 8058_s3 failed\n",
+								__func__);
+			goto fail;
+		}
+	}
+
+	gpio_direction_output(GPIO_CDC_RST_N, 0);
+	usleep_range(1000, 1050);
+	gpio_direction_output(GPIO_CDC_RST_N, 1);
+	usleep_range(1000, 1050);
+
+	return 0;
+fail:
+	return rc;
+}
+
+/* qualcomm patch end */
 /* Power analog function of codec */
 static struct regulator *vreg_timpani_cdc_apwr;
 static int msm_timpani_codec_power(int vreg_on)
@@ -11702,6 +11343,7 @@ static struct marimba_platform_data timpani_pdata = {
 	.slave_id[MARIMBA_SLAVE_ID_QMEMBIST] = TIMPANI_SLAVE_ID_QMEMBIST_ADDR,
 	.marimba_setup = msm_timpani_setup_power,
 	.marimba_shutdown = msm_timpani_shutdown_power,
+	.timpani_reset_config = msm_timpani_reset,
 	.codec = &timpani_codec_pdata,
 	.tsadc_ssbi_adap = MARIMBA_SSBI_ADAP,
 };
@@ -12509,7 +12151,6 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
-	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(54); /* GSBI6(2) */
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 #ifdef CONFIG_MSM_GSBI9_UART
@@ -13744,7 +13385,7 @@ error1:
 	
 #elif defined(CONFIG_KOR_MODEL_SHV_E120L)
 	struct regulator *l3;
-	
+
 	l3 = regulator_get(NULL, "8058_l3");
 	//		   if (IS_ERR(l17))
 	//			return -1;
@@ -14571,38 +14212,56 @@ static int mipi_S6E8AA0_panel_power(int enable)
 #endif
 
 #if defined (CONFIG_FB_MSM_LCDC_LD9040_WVGA_PANEL)
- static int lcdc_LD9040_panel_power(int enable)
+static int panel_uv = 0;
+module_param(panel_uv, int, 0664);
+
+#define LD9040_DEFAULT_VOLTAGE 3000000
+
+int lcdc_LD9040_panel_power(int enable)
 {
 	static struct regulator *l3 = NULL;
-    static struct regulator *l19 = NULL;
+	static struct regulator *l19 = NULL;
 	int ret;
+	static int panel_voltage = LD9040_DEFAULT_VOLTAGE;
 
 	printk("[kmj] %s:enable:%d\n", __FUNCTION__, enable);
 
-    if(l3 == NULL)
-    {
-        	l3 = regulator_get(NULL, "8058_l3");
-        	if (IS_ERR(l3))
+	if(l3 == NULL) {
+		l3 = regulator_get(NULL, "8058_l3");
+		if (IS_ERR(l3))
         		return -1;
 
-        	ret = regulator_set_voltage(l3, 1800000, 1800000);
-        	if (ret) {
+		ret = regulator_set_voltage(l3, 1800000, 1800000);
+		if (ret) {
         		printk("%s: error setting voltage\n", __func__);
-        	}
-    }
+		}
+	}
             
-    if(l19 == NULL)
-    {            
-        	l19 = regulator_get(NULL, "8058_l19");
-        	if (IS_ERR(l19))
-        		return -1;
+	if(l19 == NULL)
+	{
+		l19 = regulator_get(NULL, "8058_l19");
+		if (IS_ERR(l19))
+			return -1;
 
-        	ret = regulator_set_voltage(l19, 3000000, 3000000);
-        	if (ret) {
-        		printk("%s: error setting voltage\n", __func__);
-        	}
-    }
-    
+		ret = regulator_set_voltage(l19, LD9040_DEFAULT_VOLTAGE, LD9040_DEFAULT_VOLTAGE);
+		if (ret) {
+			printk("%s: error setting voltage\n", __func__);
+		}
+	}
+
+	/* Panel-undervolt interface */
+	if ((panel_uv < 0) || (panel_uv > 500) || ((panel_uv % 25) != 0)) {
+		printk("%s: invalid undervolt set: %dmV\n", __func__, panel_uv);
+		panel_uv = (LD9040_DEFAULT_VOLTAGE - panel_voltage) / 1000;
+		printk("%s: falling back to %dmV undervolt\n", __func__, panel_uv);
+	} else if (panel_uv != (LD9040_DEFAULT_VOLTAGE - panel_voltage) / 1000) {
+		panel_voltage = LD9040_DEFAULT_VOLTAGE - (panel_uv * 1000);
+
+		ret = regulator_set_voltage(l19, panel_voltage, panel_voltage);
+		if (ret)
+			printk("%s: error setting voltage\n", __func__);
+	}
+
 	if (enable) {
 
         	ret = regulator_enable(l3);
@@ -14633,9 +14292,6 @@ static int mipi_S6E8AA0_panel_power(int enable)
 static void lcdc_samsung_panel_power(int on)
 {
 	int n, ret = 0;
-
-//	display_common_power(on);
-    lcdc_LD9040_panel_power(on);
 
 	for (n = 0; n < LCDC_NUM_GPIO; n++) {
 		if (on) {
@@ -15451,6 +15107,15 @@ static void sensor_power_off_mag(void)
 {
 	sensor_power_off_vdd(0, 0, 0, 1);
 }
+
+#ifdef CONFIG_SEC_AUDIO_I2S_DRIVING_CURRENT
+static void codec_i2s_strength_init(void)
+{
+	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_SCK_HDRV, GPIO_CFG_8MA);
+	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_WS_HDRV, GPIO_CFG_8MA);
+	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_DOUT_HDRV, GPIO_CFG_8MA);
+}
+#endif
 
 #ifdef CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT
 static int lcdc_panel_power(int on)
@@ -16365,7 +16030,7 @@ static struct msm_bus_vectors mdp_vga_vectors[] = {
 		.ib = 417600000, // as 1080p
 #elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) // test		
 		.ab = 334080000, // as 1080p
-		.ib = 417600000, // as 1080p
+		.ib = 550000000 * 2, // as 1080p
 #elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL) 
 		.ab = 334080000, // as 1080p
 		.ib = 417600000, // as 1080p
@@ -16393,7 +16058,7 @@ static struct msm_bus_vectors mdp_720p_vectors[] = {
 		.ib = 417600000, // as 1080p
 #elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) // test		
 		.ab = 334080000, // as 1080p
-		.ib = 417600000, // as 1080p
+		.ib = 550000000 * 2, // as 1080p
 #elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL) // test		
 		.ab = 334080000, // as 1080p
 		.ib = 417600000, // as 1080p
@@ -16482,7 +16147,7 @@ static struct msm_bus_scale_pdata mdp_bus_scale_pdata = {
 };
 
 #endif
-#ifdef CONFIG_MSM_BUS_SCALING
+#ifdef CONFIG_FB_MSM_DTV
 static struct msm_bus_vectors dtv_bus_init_vectors[] = {
 	/* For now, 0th array entry is reserved.
 	 * Please leave 0 as is and don't use it
@@ -16521,25 +16186,6 @@ static struct msm_bus_vectors dtv_bus_def_vectors[] = {
 	},
 };
 
-static struct msm_bus_vectors dtv_bus_hdmi_prim_vectors[] = {
-	/* For now, 0th array entry is reserved.
-	 * Please leave 0 as is and don't use it
-	 */
-	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 2000000000,
-		.ib = 2000000000,
-	},
-	/* Master and slaves can be from different fabrics */
-	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 2000000000,
-		.ib = 2000000000,
-	},
-};
-
 static struct msm_bus_paths dtv_bus_scale_usecases[] = {
 	{
 		ARRAY_SIZE(dtv_bus_init_vectors),
@@ -16562,27 +16208,6 @@ static struct lcdc_platform_data dtv_pdata = {
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	.lcdc_power_save = hdmi_panel_power,
 #endif
-};
-
-static struct msm_bus_paths dtv_hdmi_prim_bus_scale_usecases[] = {
-	{
-		ARRAY_SIZE(dtv_bus_init_vectors),
-		dtv_bus_init_vectors,
-	},
-	{
-		ARRAY_SIZE(dtv_bus_hdmi_prim_vectors),
-		dtv_bus_hdmi_prim_vectors,
-	},
-};
-
-static struct msm_bus_scale_pdata dtv_hdmi_prim_bus_scale_pdata = {
-	dtv_hdmi_prim_bus_scale_usecases,
-	ARRAY_SIZE(dtv_hdmi_prim_bus_scale_usecases),
-	.name = "dtv",
-};
-
-static struct lcdc_platform_data dtv_hdmi_prim_pdata = {
-	.bus_scale_table = &dtv_hdmi_prim_bus_scale_pdata,
 };
 #endif
 
@@ -16709,18 +16334,290 @@ static int atv_dac_power(int on)
 }
 #endif
 
+struct mdp_table_entry mdp_gamma_jdi[] = {
+        {0x94800, 0x000000, 0x0},
+        {0x94804, 0x000100, 0x0},
+        {0x94808, 0x010201, 0x0},
+        {0x9480C, 0x020302, 0x0},
+        {0x94810, 0x030403, 0x0},
+        {0x94814, 0x040504, 0x0},
+        {0x94818, 0x050605, 0x0},
+        {0x9481C, 0x060706, 0x0},
+        {0x94820, 0x070807, 0x0},
+        {0x94824, 0x080908, 0x0},
+        {0x94828, 0x090A09, 0x0},
+        {0x9482C, 0x0A0B0A, 0x0},
+        {0x94830, 0x0B0C0B, 0x0},
+        {0x94834, 0x0B0D0C, 0x0},
+        {0x94838, 0x0C0E0D, 0x0},
+        {0x9483C, 0x0D0F0E, 0x0},
+        {0x94840, 0x0E100F, 0x0},
+        {0x94844, 0x0F1110, 0x0},
+        {0x94848, 0x101210, 0x0},
+        {0x9484C, 0x111311, 0x0},
+        {0x94850, 0x121412, 0x0},
+        {0x94854, 0x131513, 0x0},
+        {0x94858, 0x141614, 0x0},
+        {0x9485C, 0x151715, 0x0},
+        {0x94860, 0x161816, 0x0},
+        {0x94864, 0x161917, 0x0},
+        {0x94868, 0x171A18, 0x0},
+        {0x9486C, 0x181B19, 0x0},
+        {0x94870, 0x191C1A, 0x0},
+        {0x94874, 0x1A1D1B, 0x0},
+        {0x94878, 0x1B1E1C, 0x0},
+        {0x9487C, 0x1C1F1D, 0x0},
+        {0x94880, 0x1D201E, 0x0},
+        {0x94884, 0x1E211F, 0x0},
+        {0x94888, 0x1F2220, 0x0},
+        {0x9488C, 0x202320, 0x0},
+        {0x94890, 0x212421, 0x0},
+        {0x94894, 0x212522, 0x0},
+        {0x94898, 0x222623, 0x0},
+        {0x9489C, 0x232724, 0x0},
+        {0x948A0, 0x242825, 0x0},
+        {0x948A4, 0x252926, 0x0},
+        {0x948A8, 0x262A27, 0x0},
+        {0x948AC, 0x272B28, 0x0},
+        {0x948B0, 0x282C29, 0x0},
+        {0x948B4, 0x292D2A, 0x0},
+        {0x948B8, 0x2A2E2B, 0x0},
+        {0x948BC, 0x2B2F2C, 0x0},
+        {0x948C0, 0x2C302D, 0x0},
+        {0x948C4, 0x2C312E, 0x0},
+        {0x948C8, 0x2D322F, 0x0},
+        {0x948CC, 0x2E3330, 0x0},
+        {0x948D0, 0x2F3430, 0x0},
+        {0x948D4, 0x303531, 0x0},
+        {0x948D8, 0x313632, 0x0},
+        {0x948DC, 0x323733, 0x0},
+        {0x948E0, 0x333834, 0x0},
+        {0x948E4, 0x343935, 0x0},
+        {0x948E8, 0x353A36, 0x0},
+        {0x948EC, 0x363B37, 0x0},
+        {0x948F0, 0x373C38, 0x0},
+        {0x948F4, 0x373D39, 0x0},
+        {0x948F8, 0x383E3A, 0x0},
+        {0x948FC, 0x393F3B, 0x0},
+        {0x94900, 0x3A403C, 0x0},
+        {0x94904, 0x3B413D, 0x0},
+        {0x94908, 0x3C423E, 0x0},
+        {0x9490C, 0x3D433F, 0x0},
+        {0x94910, 0x3E4440, 0x0},
+        {0x94914, 0x3F4540, 0x0},
+        {0x94918, 0x404641, 0x0},
+        {0x9491C, 0x414742, 0x0},
+        {0x94920, 0x424843, 0x0},
+        {0x94924, 0x424944, 0x0},
+        {0x94928, 0x434A45, 0x0},
+        {0x9492C, 0x444B46, 0x0},
+        {0x94930, 0x454C47, 0x0},
+        {0x94934, 0x464D48, 0x0},
+        {0x94938, 0x474E49, 0x0},
+        {0x9493C, 0x484F4A, 0x0},
+        {0x94940, 0x49504B, 0x0},
+        {0x94944, 0x4A514C, 0x0},
+        {0x94948, 0x4B524D, 0x0},
+        {0x9494C, 0x4C534E, 0x0},
+        {0x94950, 0x4D544F, 0x0},
+        {0x94954, 0x4E5550, 0x0},
+        {0x94958, 0x4E5650, 0x0},
+        {0x9495C, 0x4F5751, 0x0},
+        {0x94960, 0x505852, 0x0},
+        {0x94964, 0x515953, 0x0},
+        {0x94968, 0x525A54, 0x0},
+        {0x9496C, 0x535B55, 0x0},
+        {0x94970, 0x545C56, 0x0},
+        {0x94974, 0x555D57, 0x0},
+        {0x94978, 0x565E58, 0x0},
+        {0x9497C, 0x575F59, 0x0},
+        {0x94980, 0x58605A, 0x0},
+        {0x94984, 0x59615B, 0x0},
+        {0x94988, 0x59625C, 0x0},
+        {0x9498C, 0x5A635D, 0x0},
+        {0x94990, 0x5B645E, 0x0},
+        {0x94994, 0x5C655F, 0x0},
+        {0x94998, 0x5D6660, 0x0},
+        {0x9499C, 0x5E6760, 0x0},
+        {0x949A0, 0x5F6861, 0x0},
+        {0x949A4, 0x606962, 0x0},
+        {0x949A8, 0x616A63, 0x0},
+        {0x949AC, 0x626B64, 0x0},
+        {0x949B0, 0x636C65, 0x0},
+        {0x949B4, 0x646D66, 0x0},
+        {0x949B8, 0x646E67, 0x0},
+        {0x949BC, 0x656F68, 0x0},
+        {0x949C0, 0x667069, 0x0},
+        {0x949C4, 0x67716A, 0x0},
+        {0x949C8, 0x68726B, 0x0},
+        {0x949CC, 0x69736C, 0x0},
+        {0x949D0, 0x6A746D, 0x0},
+        {0x949D4, 0x6B756E, 0x0},
+        {0x949D8, 0x6C766F, 0x0},
+        {0x949DC, 0x6D7770, 0x0},
+        {0x949E0, 0x6E7870, 0x0},
+        {0x949E4, 0x6F7971, 0x0},
+        {0x949E8, 0x6F7A72, 0x0},
+        {0x949EC, 0x707B73, 0x0},
+        {0x949F0, 0x717C74, 0x0},
+        {0x949F4, 0x727D75, 0x0},
+        {0x949F8, 0x737E76, 0x0},
+        {0x949FC, 0x747F77, 0x0},
+        {0x94A00, 0x758078, 0x0},
+        {0x94A04, 0x768179, 0x0},
+        {0x94A08, 0x77827A, 0x0},
+        {0x94A0C, 0x78837B, 0x0},
+        {0x94A10, 0x79847C, 0x0},
+        {0x94A14, 0x7A857D, 0x0},
+        {0x94A18, 0x7A867E, 0x0},
+        {0x94A1C, 0x7B877F, 0x0},
+        {0x94A20, 0x7C8880, 0x0},
+        {0x94A24, 0x7D8980, 0x0},
+        {0x94A28, 0x7E8A81, 0x0},
+        {0x94A2C, 0x7F8B82, 0x0},
+        {0x94A30, 0x808C83, 0x0},
+        {0x94A34, 0x818D84, 0x0},
+        {0x94A38, 0x828E85, 0x0},
+        {0x94A3C, 0x838F86, 0x0},
+        {0x94A40, 0x849087, 0x0},
+        {0x94A44, 0x859188, 0x0},
+        {0x94A48, 0x859289, 0x0},
+        {0x94A4C, 0x86938A, 0x0},
+        {0x94A50, 0x87948B, 0x0},
+        {0x94A54, 0x88958C, 0x0},
+        {0x94A58, 0x89968D, 0x0},
+        {0x94A5C, 0x8A978E, 0x0},
+        {0x94A60, 0x8B988F, 0x0},
+        {0x94A64, 0x8C9990, 0x0},
+        {0x94A68, 0x8D9A90, 0x0},
+        {0x94A6C, 0x8E9B91, 0x0},
+        {0x94A70, 0x8F9C92, 0x0},
+        {0x94A74, 0x909D93, 0x0},
+        {0x94A78, 0x909E94, 0x0},
+        {0x94A7C, 0x919F95, 0x0},
+        {0x94A80, 0x92A096, 0x0},
+        {0x94A84, 0x93A197, 0x0},
+        {0x94A88, 0x94A298, 0x0},
+        {0x94A8C, 0x95A399, 0x0},
+        {0x94A90, 0x96A49A, 0x0},
+        {0x94A94, 0x97A59B, 0x0},
+        {0x94A98, 0x98A69C, 0x0},
+        {0x94A9C, 0x99A79D, 0x0},
+        {0x94AA0, 0x9AA89E, 0x0},
+        {0x94AA4, 0x9BA99F, 0x0},
+        {0x94AA8, 0x9CAAA0, 0x0},
+        {0x94AAC, 0x9CABA0, 0x0},
+        {0x94AB0, 0x9DACA1, 0x0},
+        {0x94AB4, 0x9EADA2, 0x0},
+        {0x94AB8, 0x9FAEA3, 0x0},
+        {0x94ABC, 0xA0AFA4, 0x0},
+        {0x94AC0, 0xA1B0A5, 0x0},
+        {0x94AC4, 0xA2B1A6, 0x0},
+        {0x94AC8, 0xA3B2A7, 0x0},
+        {0x94ACC, 0xA4B3A8, 0x0},
+        {0x94AD0, 0xA5B4A9, 0x0},
+        {0x94AD4, 0xA6B5AA, 0x0},
+        {0x94AD8, 0xA7B6AB, 0x0},
+        {0x94ADC, 0xA7B7AC, 0x0},
+        {0x94AE0, 0xA8B8AD, 0x0},
+        {0x94AE4, 0xA9B9AE, 0x0},
+        {0x94AE8, 0xAABAAF, 0x0},
+        {0x94AEC, 0xABBBB0, 0x0},
+        {0x94AF0, 0xACBCB0, 0x0},
+        {0x94AF4, 0xADBDB1, 0x0},
+        {0x94AF8, 0xAEBEB2, 0x0},
+        {0x94AFC, 0xAFBFB3, 0x0},
+        {0x94B00, 0xB0C0B4, 0x0},
+        {0x94B04, 0xB1C1B5, 0x0},
+        {0x94B08, 0xB2C2B6, 0x0},
+        {0x94B0C, 0xB2C3B7, 0x0},
+        {0x94B10, 0xB3C4B8, 0x0},
+        {0x94B14, 0xB4C5B9, 0x0},
+        {0x94B18, 0xB5C6BA, 0x0},
+        {0x94B1C, 0xB6C7BB, 0x0},
+        {0x94B20, 0xB7C8BC, 0x0},
+        {0x94B24, 0xB8C9BD, 0x0},
+        {0x94B28, 0xB9CABE, 0x0},
+        {0x94B2C, 0xBACBBF, 0x0},
+        {0x94B30, 0xBBCCC0, 0x0},
+        {0x94B34, 0xBCCDC0, 0x0},
+        {0x94B38, 0xBDCEC1, 0x0},
+        {0x94B3C, 0xBDCFC2, 0x0},
+        {0x94B40, 0xBED0C3, 0x0},
+        {0x94B44, 0xBFD1C4, 0x0},
+        {0x94B48, 0xC0D2C5, 0x0},
+        {0x94B4C, 0xC1D3C6, 0x0},
+        {0x94B50, 0xC2D4C7, 0x0},
+        {0x94B54, 0xC3D5C8, 0x0},
+        {0x94B58, 0xC4D6C9, 0x0},
+        {0x94B5C, 0xC5D7CA, 0x0},
+        {0x94B60, 0xC6D8CB, 0x0},
+        {0x94B64, 0xC7D9CC, 0x0},
+        {0x94B68, 0xC8DACD, 0x0},
+        {0x94B6C, 0xC8DBCE, 0x0},
+        {0x94B70, 0xC9DCCF, 0x0},
+        {0x94B74, 0xCADDD0, 0x0},
+        {0x94B78, 0xCBDED0, 0x0},
+        {0x94B7C, 0xCCDFD1, 0x0},
+        {0x94B80, 0xCDE0D2, 0x0},
+        {0x94B84, 0xCEE1D3, 0x0},
+        {0x94B88, 0xCFE2D4, 0x0},
+        {0x94B8C, 0xD0E3D5, 0x0},
+        {0x94B90, 0xD1E4D6, 0x0},
+        {0x94B94, 0xD2E5D7, 0x0},
+        {0x94B98, 0xD3E6D8, 0x0},
+        {0x94B9C, 0xD3E7D9, 0x0},
+        {0x94BA0, 0xD4E8DA, 0x0},
+        {0x94BA4, 0xD5E9DB, 0x0},
+        {0x94BA8, 0xD6EADC, 0x0},
+        {0x94BAC, 0xD7EBDD, 0x0},
+        {0x94BB0, 0xD8ECDE, 0x0},
+        {0x94BB4, 0xD9EDDF, 0x0},
+        {0x94BB8, 0xDAEEE0, 0x0},
+        {0x94BBC, 0xDBEFE0, 0x0},
+        {0x94BC0, 0xDCF0E1, 0x0},
+        {0x94BC4, 0xDDF1E2, 0x0},
+        {0x94BC8, 0xDEF2E3, 0x0},
+        {0x94BCC, 0xDEF3E4, 0x0},
+        {0x94BD0, 0xDFF4E5, 0x0},
+        {0x94BD4, 0xE0F5E6, 0x0},
+        {0x94BD8, 0xE1F6E7, 0x0},
+        {0x94BDC, 0xE2F7E8, 0x0},
+        {0x94BE0, 0xE3F8E9, 0x0},
+        {0x94BE4, 0xE4F9EA, 0x0},
+        {0x94BE8, 0xE5FAEB, 0x0},
+        {0x94BEC, 0xE6FBEC, 0x0},
+        {0x94BF0, 0xE7FCED, 0x0},
+        {0x94BF4, 0xE8FDEE, 0x0},
+        {0x94BF8, 0xE9FEEF, 0x0},
+        {0x94BFC, 0xEAFFF0, 0x0},
+        {0x90070, 0x0F, 0x0},
+};
+
+int celox_mdp_gamma(void)
+{
+	mdp_color_enhancement(mdp_gamma_jdi, ARRAY_SIZE(mdp_gamma_jdi));
+
+	return 0;
+}
+
 static struct msm_panel_common_pdata mdp_pdata = {
 	.gpio = MDP_VSYNC_GPIO,
 	.mdp_max_clk = 200000000,
+	.mdp_max_bw = 2000000000,
+	.mdp_bw_ab_factor = 115,
+	.mdp_bw_ib_factor = 150,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.mdp_bus_scale_table = &mdp_bus_scale_pdata,
 #endif
 	.mdp_rev = MDP_REV_41,
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-	.mem_hid = BIT(ION_CP_WB_HEAP_ID),
+	.mem_hid = BIT(ION_CP_MM_HEAP_ID),
 #else
 	.mem_hid = MEMTYPE_EBI1,
 #endif
+	.mdp_gamma = celox_mdp_gamma,
+	.mdp_iommu_split_domain = 0,
 };
 #if defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 int mdp_core_clk_rate_table[] = {
@@ -16730,18 +16627,6 @@ int mdp_core_clk_rate_table[] = {
 	200000000,
 };
 #endif
-
-static void __init reserve_mdp_memory(void)
-{
-	mdp_pdata.ov0_wb_size = MSM_FB_OVERLAY0_WRITEBACK_SIZE;
-	mdp_pdata.ov1_wb_size = MSM_FB_OVERLAY1_WRITEBACK_SIZE;
-#if defined(CONFIG_ANDROID_PMEM) && !defined(CONFIG_MSM_MULTIMEDIA_USE_ION)
-	msm8x60_reserve_table[mdp_pdata.mem_hid].size +=
-		mdp_pdata.ov0_wb_size;
-	msm8x60_reserve_table[mdp_pdata.mem_hid].size +=
-		mdp_pdata.ov1_wb_size;
-#endif
-}
 
 #ifdef CONFIG_FB_MSM_TVOUT
 
@@ -16822,50 +16707,13 @@ static void __init msm_fb_add_devices(void)
 #else
 	msm_fb_register_device("mipi_dsi", &mipi_dsi_pdata);
 #endif
-#ifdef CONFIG_MSM_BUS_SCALING
-	if (hdmi_is_primary)
-		msm_fb_register_device("dtv", &dtv_hdmi_prim_pdata);
-	else
-		msm_fb_register_device("dtv", &dtv_pdata);
+#ifdef CONFIG_FB_MSM_DTV
+	msm_fb_register_device("dtv", &dtv_pdata);
 #endif
 #ifdef CONFIG_FB_MSM_TVOUT
 	msm_fb_register_device("tvenc", &atv_pdata);
 	msm_fb_register_device("tvout_device", NULL);
 #endif
-}
-
-/**
- * Set MDP clocks to high frequency to avoid underflow when
- * using high resolution 1200x1920 WUXGA/HDMI as primary panels
- */
-static void set_mdp_clocks_for_wuxga(void)
-{
-	mdp_sd_smi_vectors[0].ab = 2000000000;
-	mdp_sd_smi_vectors[0].ib = 2000000000;
-	mdp_sd_smi_vectors[1].ab = 2000000000;
-	mdp_sd_smi_vectors[1].ib = 2000000000;
-
-	mdp_sd_ebi_vectors[0].ab = 2000000000;
-	mdp_sd_ebi_vectors[0].ib = 2000000000;
-	mdp_sd_ebi_vectors[1].ab = 2000000000;
-	mdp_sd_ebi_vectors[1].ib = 2000000000;
-
-	mdp_vga_vectors[0].ab = 2000000000;
-	mdp_vga_vectors[0].ib = 2000000000;
-	mdp_vga_vectors[1].ab = 2000000000;
-	mdp_vga_vectors[1].ib = 2000000000;
-
-	mdp_720p_vectors[0].ab = 2000000000;
-	mdp_720p_vectors[0].ib = 2000000000;
-	mdp_720p_vectors[1].ab = 2000000000;
-	mdp_720p_vectors[1].ib = 2000000000;
-
-	mdp_1080p_vectors[0].ab = 2000000000;
-	mdp_1080p_vectors[0].ib = 2000000000;
-	mdp_1080p_vectors[1].ab = 2000000000;
-	mdp_1080p_vectors[1].ib = 2000000000;
-
-	mdp_pdata.mdp_max_clk = 200000000;
 }
 
 #if 0 // (defined(CONFIG_MARIMBA_CORE)) && (defined(CONFIG_MSM_BT_POWER) || defined(CONFIG_MSM_BT_POWER_MODULE))
@@ -17426,7 +17274,7 @@ static struct msm_board_data msm8x60_charm_ffa_board_data __initdata = {
 static struct msm_board_data msm8x60_dragon_board_data __initdata = {
 	.gpiomux_cfgs = msm8x60_dragon_gpiomux_cfgs,
 };
-
+/*
 #if defined(CONFIG_KOR_MODEL_SHV_E120L)
 extern int no_console;
 static int platform_add_devices_for_MSM(struct platform_device **devs, int num)
@@ -17446,7 +17294,7 @@ static int platform_add_devices_for_MSM(struct platform_device **devs, int num)
 	return ret;
 }
 #endif
-
+*/
 /* turn off unused ldo */
 static void pmic_regulator_force_off(void)
 {
@@ -17529,6 +17377,8 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 
 	pmic_reset_irq = PM8058_IRQ_BASE + PM8058_RESOUT_IRQ;
 
+	msm_tsens_early_init(&msm_tsens_pdata);
+
 	/*
 	 * Initialize RPM first as other drivers and devices may need
 	 * it for their initialization.
@@ -17604,6 +17454,14 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	if (!machine_is_msm8x60_rumi3() && !machine_is_msm8x60_sim())
 		acpuclk_init(&acpuclk_8x60_soc_data);
 
+#ifdef CONFIG_CPU_FREQ_GOV_BADASS_2_PHASE
+  	set_two_phase_freq_badass(CONFIG_CPU_FREQ_GOV_BADASS_2_PHASE_FREQ);
+#endif
+
+#ifdef CONFIG_CPU_FREQ_GOV_BADASS_3_PHASE
+	set_three_phase_freq_badass(CONFIG_CPU_FREQ_GOV_BADASS_3_PHASE_FREQ);
+#endif 
+
 	/*
 	 * Enable EBI2 only for boards which make use of it. Leave
 	 * it disabled for all others for additional power savings.
@@ -17614,6 +17472,10 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 			machine_is_msm8x60_fluid() ||
 			machine_is_msm8x60_dragon())
 		msm8x60_init_ebi2();
+
+#ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
+	set_two_phase_freq(1134000);
+#endif
 	msm8x60_init_tlmm();
 #ifdef CONFIG_BATTERY_SEC
 	if(is_lpm_boot)
@@ -17621,9 +17483,11 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	else
 #endif
 	msm8x60_init_gpiomux(board_data->gpiomux_cfgs);
+/*
 #if defined(CONFIG_KOR_MODEL_SHV_E120L)
 	if (!no_console)
 #endif
+*/
 	msm8x60_init_uart12dm();
 #ifdef CONFIG_MSM_CAMERA_V4L2
 	msm8x60_init_cam();
@@ -17692,12 +17556,11 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 		if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1)
 			platform_add_devices(msm_footswitch_devices,
 					     msm_num_footswitch_devices);
-
-#if !defined(CONFIG_KOR_MODEL_SHV_E120L)
+//#if !defined(CONFIG_KOR_MODEL_SHV_E120L)
 		platform_add_devices(surf_devices, ARRAY_SIZE(surf_devices));
-#else
-		platform_add_devices_for_MSM(surf_devices, ARRAY_SIZE(surf_devices));
-#endif
+//#else
+//		platform_add_devices_for_MSM(surf_devices, ARRAY_SIZE(surf_devices));
+//#endif
 
 #ifdef CONFIG_MSM_DSPS
 		if (machine_is_msm8x60_fluid()) {
@@ -17871,7 +17734,9 @@ vibrator_device_gpio_init();
 			printk("Fail to create sec_debug_level file\n");
 	}
 #endif /*CONFIG_KERNEL_DEBUG_SEC*/
-
+#ifdef CONFIG_SEC_AUDIO_I2S_DRIVING_CURRENT
+	codec_i2s_strength_init();
+#endif
 }
 
 static void __init msm8x60_rumi3_init(void)

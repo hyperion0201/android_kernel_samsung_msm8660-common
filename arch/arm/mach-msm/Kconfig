@@ -1629,23 +1629,63 @@ choice
 		bool "Reset the entire chip"
 endchoice
 
-config TARGET_SERIES_CELOX
-	bool "SERIES_CELOX"
-	help
-	  Support models of celox series
+choice
+	prompt "TARGET SERIES"
+	default TARGET_SERIES_CELOX
 
-config TARGET_LOCALE_USA
-	bool "Locale USA"
-	help
-	  Support USA Board
+	config TARGET_SERIES_CELOX
+		bool "SERIES_CELOX"
+		help
+		  Support models of celox series
 
-config USA_MODEL_SGH_I727
-	depends on TARGET_SERIES_CELOX
-	bool "USA ATT SGH-I727"
+	config TARGET_SERIES_DALI
+		bool "SERIES_DALI"
+		help
+		  Support models of dali series
+endchoice
 
-config USA_MODEL_SGH_T989
-	depends on TARGET_SERIES_CELOX
-	bool "USA ATT SGH-T989"
+choice
+	prompt "TARGET LOCALE"
+	default TARGET_LOCALE_KOR
+
+	config TARGET_LOCALE_KOR
+		bool "Locale KOR "
+		help
+		  Support Korea SKT Board
+
+	config TARGET_LOCALE_USA
+		bool "Locale USA "
+		help
+		  Support USA Board
+endchoice
+
+choice
+		prompt "KOR Model Name"
+		default KOR_MODEL_SHV_E110S
+		depends on TARGET_LOCALE_KOR
+
+		config KOR_MODEL_SHV_E110S
+			bool "SHV-E110S"
+		config KOR_MODEL_SHV_E120S
+			bool "SHV-E120S"
+		config KOR_MODEL_SHV_E120K
+			bool "SHV-E120K"
+		config KOR_MODEL_SHV_E120L
+			bool "SHV-E120L"
+endchoice
+
+choice
+		prompt "USA Model Name"
+		depends on TARGET_LOCALE_USA
+
+		config USA_MODEL_SGH_I727
+		depends on TARGET_SERIES_CELOX
+			bool "USA ATT SGH-I727"
+
+		config USA_MODEL_SGH_T989
+		depends on TARGET_SERIES_CELOX
+			bool "USA ATT SGH-T989"
+endchoice
 
 config SEC_AUDIO_DEVICE
 	bool "Sec AUDIO DEVICE"
