@@ -31,9 +31,7 @@ brightness-update has effect after return of it.
 solution :
 reschedule 'first set_backlight()'
 */
-#if 0
 #define FEATURE_BRIGHTNESS_DELAY_AFTER_WAKEUP
-#endif
 #ifdef FEATURE_BRIGHTNESS_DELAY_AFTER_WAKEUP
 #include <linux/workqueue.h>
 #endif 
@@ -1677,14 +1675,12 @@ static int lcd_power(struct msm_fb_data_type *mfd, struct lcd_setting *plcd, int
 	
     if(power == FB_BLANK_UNBLANK)
     {
-		if (s6e8aa0_lcd.lcd_state.powered_up && s6e8aa0_lcd.lcd_state.display_on) {
+		if(s6e8aa0_lcd.lcd_state.display_on == TRUE)
 			return ret;
-		}
-		else {
+
     		// LCD ON
     		DPRINT("%s : LCD_ON\n", __func__);
     		lcd_on_seq(mfd);
-		}
     }
     else if(power == FB_BLANK_POWERDOWN)
     {
@@ -1774,31 +1770,6 @@ static DEVICE_ATTR(auto_brightness, 0664,
 
 #endif
 
-/////////////////]
-
-
-/*
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void early_suspend(struct early_suspend *h) 
-{
-#ifdef CONFIG_S6E8AA0_HAS_EARLYSUSPEND
-	DPRINT("%s +\n", __func__);
-	lcd_off_seq(pMFD);
-	DPRINT("%s -\n", __func__);
- 	return;
-#endif
-}
-
-static void late_resume(struct early_suspend *h) 
-{
-#ifdef CONFIG_S6E8AA0_HAS_EARLYSUSPEND
-	DPRINT("%s\n", __func__);
-	lcd_on_seq(pMFD);
-	return;
-#endif
-}
-#endif
-*/
 #ifdef FEATURE_BRIGHTNESS_DELAY_AFTER_WAKEUP
 static void sec_lcd_work_func(struct work_struct *work)
 {
@@ -1854,14 +1825,6 @@ static int __devinit lcd_probe(struct platform_device *pdev)
 	s6e8aa0_lcd.auto_brightness = 0;
 #endif
 	mutex_init( &(s6e8aa0_lcd.lock) );
-/*
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	 s6e8aa0_lcd.early_suspend.suspend = early_suspend;
-	 s6e8aa0_lcd.early_suspend.resume = late_resume;
-	 s6e8aa0_lcd.early_suspend.level = LCD_OFF_GAMMA_VALUE;
-	 register_early_suspend(&s6e8aa0_lcd.early_suspend);
-#endif
-*/
 	DPRINT("msm_fb_add_device +\n");
 	msm_fb_add_device(pdev);
 	DPRINT("msm_fb_add_device -\n");
@@ -1900,9 +1863,6 @@ static int __devinit lcd_probe(struct platform_device *pdev)
 	ret = device_create_file(sysfs_panel_dev, &dev_attr_lcd_power);  
 	if (ret < 0)
 		DPRINT("lcd_power failed to add sysfs entries\n");
-//		dev_err(&(pdev->dev), "failed to add sysfs entries\n");
-
-	// mdnie sysfs create
 #ifdef MAPPING_TBL_AUTO_BRIGHTNESS
 #ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
     if(1){

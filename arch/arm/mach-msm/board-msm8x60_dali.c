@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -180,11 +180,10 @@
 #if defined(CONFIG_TDMB) || defined(CONFIG_TDMB_MODULE)
 #include <mach/tdmb_pdata.h>
 #endif
-/*
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 #include <linux/video/sec_mipi_lcd_esd_refresh.h>
 #endif
-*/
+
 #ifdef CONFIG_CPU_FREQ_GOV_BADASS_2_PHASE
 	int set_two_phase_freq_badass(int cpufreq);
 #endif
@@ -293,6 +292,10 @@ static struct platform_device ion_dev;
 
 #ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
 int set_two_phase_freq(int cpufreq);
+#endif
+
+#ifdef CONFIG_CPU_FREQ_GOV_UBERDEMAND
+int set_second_phase_freq(int cpufreq);
 #endif
 
 #if defined (CONFIG_OPTICAL_GP2A) || defined (CONFIG_OPTICAL_GP2AP020A00F) || defined(CONFIG_OPTICAL_TAOS)
@@ -731,8 +734,8 @@ static struct regulator_init_data saw_s0_init_data = {
 		.constraints = {
 			.name = "8901_s0",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 700000,
-			.max_uV = 1400000,
+			.min_uV = 800000,
+			.max_uV = 1250000,
 		},
 		.consumer_supplies = vreg_consumers_8901_S0,
 		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S0),
@@ -742,8 +745,8 @@ static struct regulator_init_data saw_s1_init_data = {
 		.constraints = {
 			.name = "8901_s1",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 700000,
-			.max_uV = 1400000,
+			.min_uV = 800000,
+			.max_uV = 1250000,
 		},
 		.consumer_supplies = vreg_consumers_8901_S1,
 		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S1),
@@ -3920,29 +3923,32 @@ static void __init msm8x60_init_dsps(void)
 /* Memory map */
 #define MSM_ION_HEAP_NUM	7
 
-#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
-#define MSM_FB_SIZE roundup((roundup((800 * 480 * 4), 4096) * 3) + \
-				(roundup((1920 * 1080 * 2), 4096) * 2), 4096)
-#else
-#define MSM_FB_SIZE roundup((roundup((800 * 480 * 4), 4096) * 3), 4096)
-#endif
+/* prim = 736 x 1280 x 4(bpp) x 2(pages) */
+#define MSM_FB_PRIM_BUF_SIZE \
+		(roundup((736 * 1280 * 4), 4096) * 3)
 
-#define MSM_SMI_BASE            0x38000000
-#define MSM_SMI_SIZE            0x4000000
+/* Note: must be multiple of 4096 */
+#define MSM_FB_SIZE roundup(MSM_FB_PRIM_BUF_SIZE + 0 + \
+				0, 4096)
 
-#define MSM_RAM_CONSOLE_BASE    0x77800000
-#define MSM_RAM_CONSOLE_SIZE    SZ_1M
+#define MSM_FB_OVERLAY0_WRITEBACK_SIZE roundup((1632 * 968 * 3 * 2), 4096)
 
-#define MSM_ION_SF_SIZE		0x3700000
-#define MSM_ION_CAMERA_SIZE	0x1000000
-#define MSM_ION_MM_FW_SIZE	0x200000
-#define MSM_ION_MM_SIZE		0x3D00000
-#define MSM_ION_MFC_SIZE	0x100000
-#define MSM_ION_AUDIO_SIZE	0x4CF000
+#define MSM_SMI_BASE			0x38000000
+#define MSM_SMI_SIZE			0x4000000
 
-#define MSM_ION_MM_FW_BASE	MSM_SMI_BASE
-#define MSM_ION_MM_BASE		0x38200000
-#define MSM_ION_MFC_BASE	0x3BF00000
+#define MSM_RAM_CONSOLE_BASE		0x77800000
+#define MSM_RAM_CONSOLE_SIZE		SZ_1M
+
+#define MSM_ION_SF_SIZE			0x4000000 /* 64MB */
+#define MSM_ION_CAMERA_SIZE		0x1200000 /* 18MB */
+#define MSM_ION_MM_FW_SIZE		0x200000 /* (2MB) */
+#define MSM_ION_MM_SIZE			0x3600000 /* (54MB) Must be a multiple of 64K */
+#define MSM_ION_MFC_SIZE		0x100000
+#define MSM_ION_AUDIO_SIZE		0x4CF000
+
+#define MSM_ION_MM_FW_BASE		MSM_SMI_BASE
+#define MSM_ION_MM_BASE			0x38200000
+#define MSM_ION_MFC_BASE		0x3BF00000
 
 static struct resource msm_fb_resources[] = {
 	{
@@ -7106,7 +7112,7 @@ static struct snd_set_ampgain init_ampgain[] = {
 		.in2_gain = 2,
 		.hp_att = 0,
 		.hp_gainup = 0,
-		.sp_att = 30,
+		.sp_att = 31,
 		.sp_gainup = 0,
 	},
     // HEADSET
@@ -7719,8 +7725,8 @@ static struct regulator_consumer_supply vreg_consumers_PM8901_S4_PC[] = {
 /* RPM early regulator constraints */
 static struct rpm_regulator_init_data rpm_regulator_early_init_data[] = {
 	/*	 ID       a_on pd ss min_uV   max_uV   init_ip    freq */
-	RPM_SMPS(PM8058_S0, 0, 1, 1,  700000, 1400000, SMPS_HMIN, 1p60),
-	RPM_SMPS(PM8058_S1, 0, 1, 1,  700000, 1400000, SMPS_HMIN, 1p60),
+	RPM_SMPS(PM8058_S0, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 1p60),
+	RPM_SMPS(PM8058_S1, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 1p60),
 };
 
 /* RPM regulator constraints */
@@ -7739,7 +7745,7 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 	RPM_LDO(PM8058_L9,  0, 1, 0, 3000000, 3000000, LDO300HMIN),
 	RPM_LDO(PM8058_L10, 0, 1, 0, 1500000, 2600000, LDO300HMIN),
 	RPM_LDO(PM8058_L11, 0, 1, 0, 2850000, 2850000, LDO150HMIN),
-	RPM_LDO(PM8058_L12, 0, 1, 0, 3300000, 3300000, LDO150HMIN),
+	RPM_LDO(PM8058_L12, 0, 1, 0, 2000000, 3300000, LDO150HMIN),
 	RPM_LDO(PM8058_L13, 0, 1, 0, 2050000, 2050000, LDO300HMIN),
 	RPM_LDO(PM8058_L14, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
 	RPM_LDO(PM8058_L15, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
@@ -7749,7 +7755,7 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 #if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 	RPM_LDO(PM8058_L19, 0, 1, 0, 3000000, 3300000, LDO150HMIN),
 #elif defined (CONFIG_KOR_MODEL_SHV_E110S) || defined (CONFIG_TARGET_LOCALE_USA)
-	RPM_LDO(PM8058_L19, 0, 1, 0, 2500000, 3000000, LDO150HMIN),
+	RPM_LDO(PM8058_L19, 0, 1, 0, 3000000, 3000000, LDO150HMIN),
 #else
 	RPM_LDO(PM8058_L19, 0, 1, 0, 2500000, 2500000, LDO150HMIN),
 #endif
@@ -7781,12 +7787,12 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 #else
 	RPM_LDO(PM8901_L3,  0, 1, 0, 3300000, 3300000, LDO300HMIN),
 #endif
-	RPM_LDO(PM8901_L4,  0, 1, 0, 1800000, 1800000, LDO300HMIN),
+	RPM_LDO(PM8901_L4,  0, 1, 0, 1800000, 2800000, LDO300HMIN),
 	RPM_LDO(PM8901_L5,  0, 1, 0, 2850000, 2850000, LDO300HMIN),
 #if defined(CONFIG_USA_MODEL_SGH_I757)
 	RPM_LDO(PM8901_L6,  0, 1, 0, 3000000, 3000000, LDO300HMIN),
 #else
-	RPM_LDO(PM8901_L6,  0, 1, 0, 2200000, 2200000, LDO300HMIN),
+	RPM_LDO(PM8901_L6,  0, 1, 0, 2400000, 2400000, LDO300HMIN),
 #endif
 
 	/*	 ID       a_on pd ss min_uV   max_uV   init_ip   freq */
@@ -9414,11 +9420,9 @@ static struct platform_device *surf_devices[] __initdata = {
 #if defined (CONFIG_SAMSUNG_JACK) || defined (CONFIG_SAMSUNG_EARJACK)
 	&sec_device_jack,
 #endif
-/*
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 	&sec_device_mipi_esd,
 #endif
-*/
 #if defined (CONFIG_OPTICAL_GP2A)|| defined(CONFIG_OPTICAL_GP2AP020A00F)
 	&opt_i2c_gpio_device,
 	&opt_gp2a,
@@ -9440,7 +9444,7 @@ static struct platform_device *surf_devices[] __initdata = {
 #ifdef CONFIG_SENSORS_AK8975
 	&akm_i2c_gpio_device,
 #endif
-&motor_i2c_gpio_device,
+ 	&motor_i2c_gpio_device,
 };
 
 #ifdef CONFIG_ION_MSM
@@ -10097,7 +10101,7 @@ static int pm8058_gpios_init(void)
 pr_err("%s PMIC_GPIO_EAR_DET : OK \n", __func__);
 	sec_jack_gpio_init();
 #endif
-/*
+
 #ifdef CONFIG_FB_MSM_MIPI_DSI_ESD_REFRESH
 	rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_ESD_DET), &sec_mipi_esd_det_gpio_cfg);
 	if (rc) {
@@ -10105,7 +10109,7 @@ pr_err("%s PMIC_GPIO_EAR_DET : OK \n", __func__);
 		return rc;
 	}
 #endif
-*/
+
 #if defined(CONFIG_HAPTIC_ISA1200) || \
 			defined(CONFIG_HAPTIC_ISA1200_MODULE)
 	if (machine_is_msm8x60_fluid()) {
@@ -13298,7 +13302,6 @@ static void tsp_power_init(void)
 	struct regulator *l1;
 	struct regulator *L4;
 #endif
-
 #ifdef CONFIG_BATTERY_SEC
 	if(is_lpm_boot){
    	        printk("%s: MXT224 Power On skipped by LPM\n", __func__);
@@ -13961,12 +13964,13 @@ static struct msm_gpio hd720_gpio_config_data[] = {
 	 { GPIO_CFG(LCD_GPIO_RESET, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), "lcd_reset" },
 };
 
+static int hd720_pm8058_gpio_config_gpio[] = { LCD_GPIO_OLED_ID };
 struct pm8058_gpio_cfg hd720_pm8058_gpio_config_data[] = {
 	{
-		LCD_GPIO_OLED_ID,
+		PM8058_GPIO_PM_TO_SYS(18),
 		{
 			.direction	= PM_GPIO_DIR_IN,
-			.pull           = PM_GPIO_PULL_DN,
+			.pull           = PM_GPIO_PULL_UP_1P5,
 			.vin_sel        = 2,
 			.function       = PM_GPIO_FUNC_NORMAL,
 			.inv_int_pol    = 0,
@@ -13990,13 +13994,13 @@ static void mipi_S6E8AA0_panel_gpio_init(void)
 		}
 	}
 
-	loop_count= ARRAY_SIZE(hd720_pm8058_gpio_config_data);
+	loop_count= ARRAY_SIZE(hd720_pm8058_gpio_config_gpio);
 	for( i=0; i<loop_count; i++)
 	{
-		rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PM8058_GPIO(hd720_pm8058_gpio_config_data[i].gpio)),
+		rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PM8058_GPIO(hd720_pm8058_gpio_config_gpio[i])),
 				&(hd720_pm8058_gpio_config_data[i].cfg));
 		if (rc < 0) {
-			pr_err("%s: pm8058_gpio_config FAIL(gpio:%d) = %d\n", __func__, hd720_pm8058_gpio_config_data[i].gpio, rc);
+			pr_err("%s: pm8058_gpio_config FAIL(gpio:%d) = %d\n", __func__, hd720_pm8058_gpio_config_gpio[i], rc);
 		}
 	}
 #if defined (CONFIG_USA_MODEL_SGH_I757)
@@ -14212,56 +14216,38 @@ static int mipi_S6E8AA0_panel_power(int enable)
 #endif
 
 #if defined (CONFIG_FB_MSM_LCDC_LD9040_WVGA_PANEL)
-static int panel_uv = 0;
-module_param(panel_uv, int, 0664);
-
-#define LD9040_DEFAULT_VOLTAGE 3000000
-
-int lcdc_LD9040_panel_power(int enable)
+ static int lcdc_LD9040_panel_power(int enable)
 {
 	static struct regulator *l3 = NULL;
-	static struct regulator *l19 = NULL;
+    static struct regulator *l19 = NULL;
 	int ret;
-	static int panel_voltage = LD9040_DEFAULT_VOLTAGE;
 
 	printk("[kmj] %s:enable:%d\n", __FUNCTION__, enable);
 
-	if(l3 == NULL) {
-		l3 = regulator_get(NULL, "8058_l3");
-		if (IS_ERR(l3))
+    if(l3 == NULL)
+    {
+        	l3 = regulator_get(NULL, "8058_l3");
+        	if (IS_ERR(l3))
         		return -1;
 
-		ret = regulator_set_voltage(l3, 1800000, 1800000);
-		if (ret) {
+        	ret = regulator_set_voltage(l3, 1800000, 1800000);
+        	if (ret) {
         		printk("%s: error setting voltage\n", __func__);
-		}
-	}
+        	}
+    }
             
-	if(l19 == NULL)
-	{
-		l19 = regulator_get(NULL, "8058_l19");
-		if (IS_ERR(l19))
-			return -1;
+    if(l19 == NULL)
+    {            
+        	l19 = regulator_get(NULL, "8058_l19");
+        	if (IS_ERR(l19))
+        		return -1;
 
-		ret = regulator_set_voltage(l19, LD9040_DEFAULT_VOLTAGE, LD9040_DEFAULT_VOLTAGE);
-		if (ret) {
-			printk("%s: error setting voltage\n", __func__);
-		}
-	}
-
-	/* Panel-undervolt interface */
-	if ((panel_uv < 0) || (panel_uv > 500) || ((panel_uv % 25) != 0)) {
-		printk("%s: invalid undervolt set: %dmV\n", __func__, panel_uv);
-		panel_uv = (LD9040_DEFAULT_VOLTAGE - panel_voltage) / 1000;
-		printk("%s: falling back to %dmV undervolt\n", __func__, panel_uv);
-	} else if (panel_uv != (LD9040_DEFAULT_VOLTAGE - panel_voltage) / 1000) {
-		panel_voltage = LD9040_DEFAULT_VOLTAGE - (panel_uv * 1000);
-
-		ret = regulator_set_voltage(l19, panel_voltage, panel_voltage);
-		if (ret)
-			printk("%s: error setting voltage\n", __func__);
-	}
-
+        	ret = regulator_set_voltage(l19, 3000000, 3000000);
+        	if (ret) {
+        		printk("%s: error setting voltage\n", __func__);
+        	}
+    }
+    
 	if (enable) {
 
         	ret = regulator_enable(l3);
@@ -14292,6 +14278,9 @@ int lcdc_LD9040_panel_power(int enable)
 static void lcdc_samsung_panel_power(int on)
 {
 	int n, ret = 0;
+
+//	display_common_power(on);
+    lcdc_LD9040_panel_power(on);
 
 	for (n = 0; n < LCDC_NUM_GPIO; n++) {
 		if (on) {
@@ -14391,13 +14380,13 @@ static int hdmi_core_power(int on, int show)
 				"8058_l16", rc);
 			return rc;
 		}
-		pr_debug("%s(on): success\n", __func__);
+		pr_info("%s(on): success\n", __func__);
 	} else {
 		rc = regulator_disable(reg_8058_l16);
 		if (rc)
-			pr_warning("'%s' regulator disable failed, rc=%d\n",
+			pr_err("'%s' regulator disable failed, rc=%d\n",
 				"8058_l16", rc);
-		pr_debug("%s(off): success\n", __func__);
+		pr_info("%s(off): success\n", __func__);
 	}
 
 	prev_on = on;
@@ -14432,12 +14421,12 @@ static int hdmi_gpio_config(int on)
 				"HDMI_HPD", 172, rc);
 			goto error3;
 		}
-		pr_debug("%s(on): success\n", __func__);
+		pr_info("%s(on): success\n", __func__);
 	} else {
 		gpio_free(170);
 		gpio_free(171);
 		gpio_free(172);
-		pr_debug("%s(off): success\n", __func__);
+		pr_info("%s(off): success\n", __func__);
 	}
 
 	prev_on = on;
@@ -14505,12 +14494,12 @@ static int hdmi_panel_power(int on)
 {
 	int rc;
 
-	pr_debug("%s: HDMI Core: %s\n", __func__, (on ? "ON" : "OFF"));
+	pr_info("%s: HDMI Core: %s\n", __func__, (on ? "ON" : "OFF"));
 	rc = hdmi_core_power(on, 1);
 	if (rc)
 		rc = hdmi_cec_power(on);
 
-	pr_debug("%s: HDMI Core: %s Success\n", __func__, (on ? "ON" : "OFF"));
+	pr_info("%s: HDMI Core: %s Success\n", __func__, (on ? "ON" : "OFF"));
 	return rc;
 }
 #undef _GET_REGULATOR
@@ -14985,10 +14974,10 @@ static void sensor_power_off_vdd(int vdd_2p85_off, int vdd_1p8_off, int vdd_2p4_
 				ret = regulator_disable(vsensor_2p85_magnetic);
 			if (ret) {
 					printk("%s: error vsensor_2p85_magnetic enabling regulator\n", __func__);
+				}
 			}
 		}
 	}
-		}
 #endif
 
 	printk("%s: vdd_2p85=%d, vdd_1p8=%d, vdd_2p_4=%d, vdd_2p85_mag=%d\n", __func__,	sensor_power_2p85_cnt, sensor_power_1p8_cnt, sensor_power_2p4_cnt, sensor_power_2p85_mag_cnt);
@@ -15107,15 +15096,6 @@ static void sensor_power_off_mag(void)
 {
 	sensor_power_off_vdd(0, 0, 0, 1);
 }
-
-#ifdef CONFIG_SEC_AUDIO_I2S_DRIVING_CURRENT
-static void codec_i2s_strength_init(void)
-{
-	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_SCK_HDRV, GPIO_CFG_8MA);
-	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_WS_HDRV, GPIO_CFG_8MA);
-	msm_tlmm_set_spkr_hdrive(CODEC_SPKR_DOUT_HDRV, GPIO_CFG_8MA);
-}
-#endif
 
 #ifdef CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT
 static int lcdc_panel_power(int on)
@@ -15992,15 +15972,12 @@ static struct msm_bus_vectors mdp_sd_ebi_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_MDP_PORT0,
 		.dst = MSM_BUS_SLAVE_SMI,
-#ifdef CONFIG_FB_MSM_MIPI_S6D6AA0_WXGA_PANEL // test
+#if defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 		.ab = 740000000,
 		.ib = 900000000,
-#elif defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
-		.ab = 740000000,
-		.ib = 900000000,
-#elif defined(CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL)
-		.ab = 740000000,
-		.ib = 900000000,
+#elif 1	/* onlyjazz.el26 : temporarilly use non-zero bandwidth in order to avoid mmfab rate change during smi_clk is disabled */
+		.ab = 0,
+		.ib = 0,
 #else	/* onlyjazz.el26 : temporarilly use non-zero bandwidth in order to avoid mmfab rate change during smi_clk is disabled */
 		.ab = 216000000,
 		.ib = 270000000 * 2,
@@ -16025,13 +16002,7 @@ static struct msm_bus_vectors mdp_vga_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_MDP_PORT0,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-#ifdef CONFIG_FB_MSM_MIPI_S6D6AA0_WXGA_PANEL // test		
-		.ab = 334080000, // as 1080p
-		.ib = 417600000, // as 1080p
-#elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) // test		
-		.ab = 334080000, // as 1080p
-		.ib = 550000000 * 2, // as 1080p
-#elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL) 
+#if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 		.ab = 334080000, // as 1080p
 		.ib = 417600000, // as 1080p
 #else
@@ -16053,13 +16024,7 @@ static struct msm_bus_vectors mdp_720p_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_MDP_PORT0,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-#ifdef CONFIG_FB_MSM_MIPI_S6D6AA0_WXGA_PANEL // test		
-		.ab = 334080000, // as 1080p
-		.ib = 417600000, // as 1080p
-#elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) // test		
-		.ab = 334080000, // as 1080p
-		.ib = 550000000 * 2, // as 1080p
-#elif defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL) // test		
+#if defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
 		.ab = 334080000, // as 1080p
 		.ib = 417600000, // as 1080p
 #else
@@ -16594,7 +16559,7 @@ struct mdp_table_entry mdp_gamma_jdi[] = {
         {0x90070, 0x0F, 0x0},
 };
 
-int celox_mdp_gamma(void)
+int dali_mdp_gamma(void)
 {
 	mdp_color_enhancement(mdp_gamma_jdi, ARRAY_SIZE(mdp_gamma_jdi));
 
@@ -16616,7 +16581,7 @@ static struct msm_panel_common_pdata mdp_pdata = {
 #else
 	.mem_hid = MEMTYPE_EBI1,
 #endif
-	.mdp_gamma = celox_mdp_gamma,
+	.mdp_gamma = dali_mdp_gamma,
 	.mdp_iommu_split_domain = 0,
 };
 #if defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL)
@@ -17274,27 +17239,7 @@ static struct msm_board_data msm8x60_charm_ffa_board_data __initdata = {
 static struct msm_board_data msm8x60_dragon_board_data __initdata = {
 	.gpiomux_cfgs = msm8x60_dragon_gpiomux_cfgs,
 };
-/*
-#if defined(CONFIG_KOR_MODEL_SHV_E120L)
-extern int no_console;
-static int platform_add_devices_for_MSM(struct platform_device **devs, int num)
-{
-	int i, ret = 0;
 
-	for (i = 0; i < num; i++) {
-		if (!no_console || devs[i] != &msm_device_uart_dm12)	{
-			ret = platform_device_register(devs[i]);
-			if (ret) {
-				while (--i >= 0)
-					platform_device_unregister(devs[i]);
-				break;
-			}
-		}
-	}
-	return ret;
-}
-#endif
-*/
 /* turn off unused ldo */
 static void pmic_regulator_force_off(void)
 {
@@ -17476,6 +17421,9 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 #ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
 	set_two_phase_freq(1134000);
 #endif
+#ifdef CONFIG_CPU_FREQ_GOV_UBERDEMAND
+	set_second_phase_freq(CONFIG_CPU_FREQ_GOV_UBERDEMAND_SECOND_PHASE_FREQ);
+#endif
 	msm8x60_init_tlmm();
 #ifdef CONFIG_BATTERY_SEC
 	if(is_lpm_boot)
@@ -17483,11 +17431,6 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	else
 #endif
 	msm8x60_init_gpiomux(board_data->gpiomux_cfgs);
-/*
-#if defined(CONFIG_KOR_MODEL_SHV_E120L)
-	if (!no_console)
-#endif
-*/
 	msm8x60_init_uart12dm();
 #ifdef CONFIG_MSM_CAMERA_V4L2
 	msm8x60_init_cam();
@@ -17556,11 +17499,8 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 		if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1)
 			platform_add_devices(msm_footswitch_devices,
 					     msm_num_footswitch_devices);
-//#if !defined(CONFIG_KOR_MODEL_SHV_E120L)
-		platform_add_devices(surf_devices, ARRAY_SIZE(surf_devices));
-//#else
-//		platform_add_devices_for_MSM(surf_devices, ARRAY_SIZE(surf_devices));
-//#endif
+		platform_add_devices(surf_devices,
+				     ARRAY_SIZE(surf_devices));
 
 #ifdef CONFIG_MSM_DSPS
 		if (machine_is_msm8x60_fluid()) {
@@ -17734,9 +17674,7 @@ vibrator_device_gpio_init();
 			printk("Fail to create sec_debug_level file\n");
 	}
 #endif /*CONFIG_KERNEL_DEBUG_SEC*/
-#ifdef CONFIG_SEC_AUDIO_I2S_DRIVING_CURRENT
-	codec_i2s_strength_init();
-#endif
+
 }
 
 static void __init msm8x60_rumi3_init(void)
